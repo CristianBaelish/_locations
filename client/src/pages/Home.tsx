@@ -15,7 +15,7 @@ export function Home() {
     const base = apiBase();
     const url = `${base}/api/rooms`;
     try {
-      if (import.meta.env.PROD && !base) {
+      if (import.meta.env.PROD && !base && import.meta.env.VITE_BUILT_ON_VERCEL !== "1") {
         throw new Error(
           "El front no tiene VITE_API_ORIGIN en el build. En Vercel: Environment Variables → VITE_API_ORIGIN = URL de Render, luego Redeploy."
         );

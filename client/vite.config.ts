@@ -30,6 +30,10 @@ export default defineConfig(({ mode }) => {
   for (const [key, value] of Object.entries(merged)) {
     define[`import.meta.env.${key}`] = JSON.stringify(value);
   }
+  /** En el build de Vercel, REST va por mismo origen + rewrite → evita "Failed to fetch" por CORS hacia Render */
+  define["import.meta.env.VITE_BUILT_ON_VERCEL"] = JSON.stringify(
+    process.env.VERCEL === "1" ? "1" : "0"
+  );
 
   const proxy = {
     "/api": { target: "http://localhost:3001", changeOrigin: true },

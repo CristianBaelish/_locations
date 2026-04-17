@@ -20,7 +20,11 @@
    - Project → Settings → Environment Variables
    - Añadí o editá:
      VITE_API_ORIGIN = https://live-pov-api.onrender.com
-     (sin barra final; debe ser exactamente la URL de Render)
+     (sin barra final; debe ser exactamente la URL de Render — la usa Socket.io)
+
+   - El repo incluye vercel.json: reescribe /api/* hacia Render para que el navegador no haga
+     peticiones cross-origin (evita "Failed to fetch" por CORS en POST /api/rooms).
+     Si cambiás la URL del servicio en Render, editá vercel.json y la línea destination.
 
    - Guardá y hacé "Redeploy" del último deployment (Deployments → ... → Redeploy).
 
