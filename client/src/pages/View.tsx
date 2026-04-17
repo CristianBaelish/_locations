@@ -16,7 +16,7 @@ type UpdatePayload = {
 
 export function View() {
   const { roomId } = useParams<{ roomId: string }>();
-  const socket = useSocket();
+  const { socket, connectionError } = useSocket();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [courseDeg, setCourseDeg] = useState<number | null>(null);
@@ -57,7 +57,13 @@ export function View() {
         Sesión: <code>{roomId}</code>
       </p>
 
-      {waiting ? <p className="muted">Esperando la primera ubicación…</p> : null}
+      {connectionError ? (
+        <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
+          {connectionError}
+        </p>
+      ) : null}
+
+      {waiting && !connectionError ? <p className="muted">Esperando la primera ubicación…</p> : null}
 
       <ViewerContextPanel sharerPos={pos} />
 

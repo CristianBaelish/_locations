@@ -18,7 +18,7 @@ const MIN_COURSE_M = 12;
 
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
-  const socket = useSocket();
+  const { socket, connectionError } = useSocket();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [geoErr, setGeoErr] = useState<string | null>(null);
@@ -132,6 +132,12 @@ export function Share() {
       <p className="muted">
         Sesión: <code>{roomId}</code>
       </p>
+
+      {connectionError ? (
+        <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
+          {connectionError}
+        </p>
+      ) : null}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <p className="muted" style={{ marginTop: 0 }}>

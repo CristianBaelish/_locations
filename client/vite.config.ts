@@ -13,10 +13,18 @@ const lanHttps = process.env.VITE_LAN_HTTPS === "1";
 export default defineConfig(({ mode }) => {
   const repoRoot = path.resolve(__dirname, "..");
   const clientRoot = __dirname;
-  const merged = {
+  const fromFiles = {
     ...loadEnv(mode, repoRoot, "VITE_"),
     ...loadEnv(mode, clientRoot, "VITE_"),
   };
+  /** Vercel/CI inyecta VITE_* en process.env; loadEnv solo lee archivos .env */
+  const fromProcess: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("VITE_") && typeof v === "string" && v.length > 0) {
+      fromProcess[k] = v;
+    }
+  }
+  const merged = { ...fromFiles, ...fromProcess };
 
   const define: Record<string, string> = {};
   for (const [key, value] of Object.entries(merged)) {

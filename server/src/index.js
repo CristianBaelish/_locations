@@ -7,16 +7,34 @@ import { nanoid } from "nanoid";
 const PORT = Number(process.env.PORT) || 3001;
 const app = express();
 
+/**
+ * Orígenes permitidos: dev local + URLs en FRONTEND_URL (coma-separadas) + subdominios vercel.app
+ * En Render: FRONTEND_URL=https://tu-app.vercel.app
+ */
+const extraOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  if (extraOrigins.includes(origin)) return true;
+  if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) return true;
+  if (/^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin)) return true;
+  if (origin.startsWith("https://") && origin.includes(".vercel.app")) return true;
+  return false;
+}
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      /^http:\/\/192\.168\.\d+\.\d+:5173$/,
-    ],
+    origin: originAllowed,
   })
 );
 app.use(express.json());
+
+app.get("/health", (_req, res) => {
+  res.type("text").send("ok");
+});
 
 /** @type {Set<string>} */
 const rooms = new Set();
@@ -34,11 +52,7 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      /^http:\/\/192\.168\.\d+\.\d+:5173$/,
-    ],
+    origin: originAllowed,
     methods: ["GET", "POST"],
   },
 });
@@ -68,6 +82,6 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server http://0.0.0.0:${PORT}`);
 });

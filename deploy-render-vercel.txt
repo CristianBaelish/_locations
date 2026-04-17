@@ -1,0 +1,30 @@
+=== API en Render + front ya en Vercel ===
+
+1) RENDER (servidor Node)
+   - New → Web Service → conectá el mismo repo de GitHub.
+   - Root Directory: server
+   - Runtime: Node
+   - Build Command: npm install
+   - Start Command: npm start
+   - Plan: Free
+
+   Environment (Environment → Add):
+   - FRONTEND_URL = https://TU-PROYECTO.vercel.app
+     (sin barra al final; si tenés varios dominios, separados por coma)
+   - NODE_VERSION = 20   (opcional, en Settings → Environment)
+
+   Deploy. Copiá la URL pública del servicio, ej:
+   https://live-pov-api.onrender.com
+
+2) VERCEL (variables del front)
+   - Project → Settings → Environment Variables
+   - Añadí o editá:
+     VITE_API_ORIGIN = https://live-pov-api.onrender.com
+     (sin barra final; debe ser exactamente la URL de Render)
+
+   - Guardá y hacé "Redeploy" del último deployment (Deployments → ... → Redeploy).
+
+3) Probar
+   - Abrí tu URL de Vercel → Empezar a compartir debe crear sesión sin error.
+
+Nota: en plan gratis Render "duerme" el servicio tras inactividad; el primer request puede tardar ~50s.

@@ -12,14 +12,32 @@ export function Home() {
   async function startSharing() {
     setBusy(true);
     setErr(null);
+    const base = apiBase();
+    const url = `${base}/api/rooms`;
     try {
-      const res = await fetch(`${apiBase()}/api/rooms`, { method: "POST" });
-      if (!res.ok) throw new Error("No se pudo crear la sesión");
+      if (import.meta.env.PROD && !base) {
+        throw new Error(
+          "El front no tiene VITE_API_ORIGIN en el build. En Vercel: Environment Variables → VITE_API_ORIGIN = URL de Render, luego Redeploy."
+        );
+      }
+      const res = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        const snippet = (await res.text()).slice(0, 120);
+        throw new Error(
+          `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el API en Render esté en marcha y que VITE_API_ORIGIN sea https://… sin barra final."}`
+        );
+      }
       const data = (await res.json()) as { roomId?: string };
-      if (!data.roomId) throw new Error("Respuesta inválida");
+      if (!data.roomId) throw new Error("Respuesta inválida del servidor");
       navigate(`/s/${data.roomId}`);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Error");
+      const msg =
+        e instanceof TypeError && String(e.message).includes("fetch")
+          ? `No hay conexión con el API (${url}). Suele ser CORS, URL mal copiada o mezcla http/https. Comprobá VITE_API_ORIGIN y abrí ${base || "(sin base)"}/health en otra pestaña.`
+          : e instanceof Error
+            ? e.message
+            : "Error";
+      setErr(msg);
     } finally {
       setBusy(false);
     }
