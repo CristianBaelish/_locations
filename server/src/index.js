@@ -8,8 +8,8 @@ const PORT = Number(process.env.PORT) || 3001;
 const app = express();
 
 /**
- * Orígenes permitidos: dev local + URLs en FRONTEND_URL (coma-separadas) + subdominios vercel.app
- * En Render: FRONTEND_URL=https://tu-app.vercel.app
+ * Orígenes: local + FRONTEND_URL + cualquier https (Vercel con dominio propio, previews, etc.)
+ * En Render opcional: FRONTEND_URL=https://tu-app.vercel.app
  */
 const extraOrigins = (process.env.FRONTEND_URL || "")
   .split(",")
@@ -21,7 +21,7 @@ function originAllowed(origin) {
   if (extraOrigins.includes(origin)) return true;
   if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) return true;
   if (/^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin)) return true;
-  if (origin.startsWith("https://") && origin.includes(".vercel.app")) return true;
+  if (origin.startsWith("https://")) return true;
   return false;
 }
 

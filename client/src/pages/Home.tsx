@@ -20,6 +20,11 @@ export function Home() {
           "El front no tiene VITE_API_ORIGIN en el build. En Vercel: Environment Variables → VITE_API_ORIGIN = URL de Render, luego Redeploy."
         );
       }
+      if (import.meta.env.PROD && base.startsWith("http://")) {
+        throw new Error(
+          "VITE_API_ORIGIN debe usar https:// (página en Vercel es HTTPS; con http:// el navegador bloquea la petición)."
+        );
+      }
       const res = await fetch(url, { method: "POST" });
       if (!res.ok) {
         const snippet = (await res.text()).slice(0, 120);
