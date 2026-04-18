@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { apiBase } from "../lib/apiBase";
+import { apiBase, fetchWithTimeout, healthCheckUrl } from "../lib/apiBase";
 import { InstallAppHint } from "../components/InstallAppHint";
 
 export function Home() {
@@ -15,9 +15,9 @@ export function Home() {
     const base = apiBase();
     const url = `${base}/api/rooms`;
     try {
-      if (import.meta.env.PROD && !base && import.meta.env.VITE_BUILT_ON_VERCEL !== "1") {
+      if (import.meta.env.PROD && !base) {
         throw new Error(
-          "El front no tiene VITE_API_ORIGIN en el build. En Vercel: Environment Variables → VITE_API_ORIGIN = URL de Render, luego Redeploy."
+          "Este build no tiene URL del API (definí VITE_API_ORIGIN con la URL de Render, sin barra final, y volvé a compilar)."
         );
       }
       if (import.meta.env.PROD && base.startsWith("http://")) {
@@ -25,7 +25,7 @@ export function Home() {
           "VITE_API_ORIGIN debe usar https:// (página en Vercel es HTTPS; con http:// el navegador bloquea la petición)."
         );
       }
-      const res = await fetch(url, { method: "POST" });
+      const res = await fetchWithTimeout(url, { method: "POST" });
       if (!res.ok) {
         const snippet = (await res.text()).slice(0, 120);
         throw new Error(
@@ -36,9 +36,15 @@ export function Home() {
       if (!data.roomId) throw new Error("Respuesta inválida del servidor");
       navigate(`/s/${data.roomId}`);
     } catch (e) {
-      const msg =
-        e instanceof TypeError && String(e.message).includes("fetch")
-          ? `No hay conexión con el API (${url}). Suele ser CORS, URL mal copiada o mezcla http/https. Comprobá VITE_API_ORIGIN y abrí ${base || "(sin base)"}/health en otra pestaña.`
+      const isAbort =
+        (typeof DOMException !== "undefined" &&
+          e instanceof DOMException &&
+          e.name === "AbortError") ||
+        (e instanceof Error && e.name === "AbortError");
+      const msg = isAbort
+        ? "El servidor tardó demasiado (en Render gratis suele “dormirse”: esperá ~1 min y reintentá, o abrís la URL del API en otra pestaña para despertarlo)."
+        : e instanceof TypeError && String(e.message).includes("fetch")
+          ? `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`
           : e instanceof Error
             ? e.message
             : "Error";

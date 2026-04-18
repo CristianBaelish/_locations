@@ -8,6 +8,10 @@
       "source": "/api/:path*",
       "destination": "https://locationsbaelish.onrender.com/api/:path*"
     },
+    {
+      "source": "/health",
+      "destination": "https://locationsbaelish.onrender.com/health"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

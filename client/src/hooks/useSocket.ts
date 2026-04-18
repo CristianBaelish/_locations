@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
+import { syncServerOrigin } from "../lib/apiBase";
 
-const origin =
-  typeof import.meta.env.VITE_API_ORIGIN === "string" &&
-  import.meta.env.VITE_API_ORIGIN.length > 0
-    ? import.meta.env.VITE_API_ORIGIN
-    : undefined;
+const origin = syncServerOrigin();
 
 export function useSocket(): {
   socket: Socket | null;

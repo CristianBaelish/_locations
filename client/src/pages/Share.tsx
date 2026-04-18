@@ -42,8 +42,11 @@ export function Share() {
 
   useJoinRoom(socket, roomId);
 
+  const socketRef = useRef(socket);
+  socketRef.current = socket;
+
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (!roomId) return;
 
     if (!navigator.geolocation) {
       setGeoErr("Tu navegador no expone geolocalización.");
@@ -89,14 +92,17 @@ export function Share() {
           lastEmit.current = { t: now, lat, lng };
           lastEmitCoords.current = { lat, lng };
 
-          socket.emit("location", {
-            roomId,
-            lat,
-            lng,
-            heading: h != null && Number.isFinite(h) ? h : undefined,
-            courseDeg: lastCourseDeg.current ?? undefined,
-            accuracy: p.coords.accuracy ?? undefined,
-          });
+          const s = socketRef.current;
+          if (s?.connected) {
+            s.emit("location", {
+              roomId,
+              lat,
+              lng,
+              heading: h != null && Number.isFinite(h) ? h : undefined,
+              courseDeg: lastCourseDeg.current ?? undefined,
+              accuracy: p.coords.accuracy ?? undefined,
+            });
+          }
         }
       },
       (e) => {
@@ -107,7 +113,7 @@ export function Share() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [socket, roomId, geoRetryToken]);
+  }, [roomId, geoRetryToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;

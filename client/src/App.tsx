@@ -3,8 +3,10 @@ import { Home } from "./pages/Home";
 import { Share } from "./pages/Share";
 import { View } from "./pages/View";
 
+/** En Vercel el REST puede ir por rewrite sin `VITE_API_ORIGIN`; Socket.io usa `syncServerOrigin()` en el cliente. */
 const apiOriginMissing =
   import.meta.env.PROD &&
+  import.meta.env.VITE_BUILT_ON_VERCEL !== "1" &&
   (!import.meta.env.VITE_API_ORIGIN || import.meta.env.VITE_API_ORIGIN.length === 0);
 
 export function App() {

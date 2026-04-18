@@ -62,6 +62,8 @@ async function findNearestPanorama(
   return null;
 }
 
+const PANO_SEARCH_TIMEOUT_MS = 25_000;
+
 export function StreetFollowView({
   position,
   headingDeg,
@@ -187,9 +189,24 @@ export function StreetFollowView({
     setPanoHasImage(false);
     pano.setVisible(false);
 
-    void findNearestPanorama(sv, latLng).then((result) => {
+    void Promise.race([
+      findNearestPanorama(sv, latLng).then((r) => ({ t: "ok" as const, r })),
+      new Promise<{ t: "timeout" }>((resolve) => {
+        window.setTimeout(() => resolve({ t: "timeout" }), PANO_SEARCH_TIMEOUT_MS);
+      }),
+    ]).then((boxed) => {
       if (panoRequestId.current !== myRequest) return;
 
+      if (boxed.t === "timeout") {
+        setPanoHint(
+          "Street View no respondió a tiempo (red lenta o API ocupada). El mapa sigue mostrando tu posición; podés reintentar moviéndote un poco."
+        );
+        panoRef.current?.setVisible(false);
+        setPanoHasImage(false);
+        return;
+      }
+
+      const result = boxed.r;
       const panoNow = panoRef.current;
       if (!panoNow || !result?.data?.location?.pano) {
         setPanoHint(
