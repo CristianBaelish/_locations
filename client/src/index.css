@@ -270,3 +270,17 @@ button:disabled {
   font-size: 0.82em;
   word-break: break-all;
 }
+
+.create-room-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: #243044;
+  overflow: hidden;
+}
+
+.create-room-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 0.35s ease-out;
+}

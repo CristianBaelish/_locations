@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { syncServerOrigin } from "../lib/apiBase";
-
-const origin = syncServerOrigin();
+import { socketServerOrigin } from "../lib/apiBase";
 
 export function useSocket(): {
   socket: Socket | null;
@@ -12,7 +10,15 @@ export function useSocket(): {
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
-    const s = io(origin, { path: "/socket.io", transports: ["websocket", "polling"] });
+    const origin = socketServerOrigin();
+    const s = io(origin, {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      timeout: 45_000,
+      reconnectionAttempts: 12,
+      reconnectionDelay: 1_000,
+      reconnectionDelayMax: 10_000,
+    });
     setSocket(s);
 
     const onErr = (err: Error) => {

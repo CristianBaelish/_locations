@@ -1,48 +1,117 @@
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
-import { apiBase, fetchWithTimeout, healthCheckUrl } from "../lib/apiBase";
+import { useEffect, useState } from "react";
+import {
+  apiBase,
+  CREATE_ROOM_RETRY_GAP_MS,
+  CREATE_ROOM_TIMEOUT_MS,
+  createRoomWorstCaseMs,
+  fetchWithTimeout,
+  HEALTH_WAKE_TIMEOUT_MS,
+  healthCheckUrl,
+} from "../lib/apiBase";
 import { InstallAppHint } from "../components/InstallAppHint";
+
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" &&
+      e instanceof DOMException &&
+      e.name === "AbortError") ||
+    (e instanceof Error && e.name === "AbortError")
+  );
+}
+
+function formatMmSs(totalMs: number): string {
+  const s = Math.max(0, Math.floor(totalMs / 1000));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function formatApproxMinutes(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000));
+  return min === 1 ? "~1 min" : `~${min} min`;
+}
 
 export function Home() {
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [createElapsedMs, setCreateElapsedMs] = useState(0);
+  const [busyStep, setBusyStep] = useState<"wake" | "post" | null>(null);
+
+  const createWorstMs = createRoomWorstCaseMs();
+
+  useEffect(() => {
+    if (!busy) {
+      setCreateElapsedMs(0);
+      return;
+    }
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      setCreateElapsedMs(Date.now() - started);
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [busy]);
 
   async function startSharing() {
     setBusy(true);
+    setBusyStep("wake");
     setErr(null);
     const base = apiBase();
     const url = `${base}/api/rooms`;
     try {
-      if (import.meta.env.PROD && !base) {
-        throw new Error(
-          "Este build no tiene URL del API (definí VITE_API_ORIGIN con la URL de Render, sin barra final, y volvé a compilar)."
-        );
-      }
       if (import.meta.env.PROD && base.startsWith("http://")) {
         throw new Error(
           "VITE_API_ORIGIN debe usar https:// (página en Vercel es HTTPS; con http:// el navegador bloquea la petición)."
         );
       }
-      const res = await fetchWithTimeout(url, { method: "POST" });
+
+      const healthUrl = healthCheckUrl();
+      const wakeRes = await fetchWithTimeout(healthUrl, {
+        method: "GET",
+        timeoutMs: HEALTH_WAKE_TIMEOUT_MS,
+      });
+      const wakeBody = (await wakeRes.text()).trim();
+      if (!wakeRes.ok) {
+        throw new Error(
+          `El servidor no respondió bien al despertar (${wakeRes.status}). Abrí ${healthUrl} en otra pestaña: tiene que verse la palabra ok. Revisá el servicio en Render (no suspendido, URL correcta).`
+        );
+      }
+      if (wakeBody !== "ok") {
+        throw new Error(
+          `Se esperaba "ok" en /health y se recibió otra cosa. Revisá Render y la variable VITE_API_ORIGIN en Vercel (sin barra final, mismo host que el panel de Render).`
+        );
+      }
+
+      setBusyStep("post");
+      const postRoom = () =>
+        fetchWithTimeout(url, { method: "POST", timeoutMs: CREATE_ROOM_TIMEOUT_MS });
+
+      let res: Response;
+      try {
+        res = await postRoom();
+      } catch (e) {
+        if (isAbortError(e)) {
+          await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
+          res = await postRoom();
+        } else {
+          throw e;
+        }
+      }
+
       if (!res.ok) {
         const snippet = (await res.text()).slice(0, 120);
         throw new Error(
-          `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el API en Render esté en marcha y que VITE_API_ORIGIN sea https://… sin barra final."}`
+          `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el servicio en Render esté en marcha y que en Vercel existan los rewrites de /api (o definí VITE_API_ORIGIN con https://… sin barra final)." }`
         );
       }
       const data = (await res.json()) as { roomId?: string };
       if (!data.roomId) throw new Error("Respuesta inválida del servidor");
       navigate(`/s/${data.roomId}`);
     } catch (e) {
-      const isAbort =
-        (typeof DOMException !== "undefined" &&
-          e instanceof DOMException &&
-          e.name === "AbortError") ||
-        (e instanceof Error && e.name === "AbortError");
-      const msg = isAbort
-        ? "El servidor tardó demasiado (en Render gratis suele “dormirse”: esperá ~1 min y reintentá, o abrís la URL del API en otra pestaña para despertarlo)."
+      const msg = isAbortError(e)
+        ? `Tiempo de espera agotado (hasta ~${formatApproxMinutes(createWorstMs)}: despertar servidor + crear sala). En Render gratis el primer arranque puede tardar varios minutos. Abrí ${healthCheckUrl()} en otra pestaña hasta ver ok; si no aparece, entrá al panel de Render y revisá que el servicio esté activo y la URL coincida con la de este proyecto.`
         : e instanceof TypeError && String(e.message).includes("fetch")
           ? `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`
           : e instanceof Error
@@ -50,6 +119,7 @@ export function Home() {
             : "Error";
       setErr(msg);
     } finally {
+      setBusyStep(null);
       setBusy(false);
     }
   }
@@ -74,10 +144,11 @@ export function Home() {
       </p>
 
       <div className="banner">
-        Clave Google Maps (<code>VITE_GOOGLE_MAPS_API_KEY</code>): archivo <code>.env</code> en la{" "}
-        <strong>raíz del proyecto</strong> o en <code>client/.env</code>. Tras cambiar el{" "}
-        <code>.env</code>, reinicia <code>npm run dev</code>. El servidor de sincronización debe estar en
-        marcha.
+        Google Maps (<code>VITE_GOOGLE_MAPS_API_KEY</code>): en{" "}
+        <strong>local</strong>, archivo <code>.env</code> en la raíz del repo o <code>client/.env</code> y
+        reiniciá <code>npm run dev</code>. En <strong>Vercel</strong>, Project → Settings → Environment
+        Variables (Production) y volvé a desplegar. El API de sincronización (Render u otro host) debe estar
+        activo para crear sesiones y compartir ubicación.
       </div>
 
       {err ? (
@@ -89,9 +160,41 @@ export function Home() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Compartir recorrido</h2>
         <p className="muted">Genera un enlace y permite el GPS en el navegador.</p>
-        <button type="button" onClick={startSharing} disabled={busy}>
-          {busy ? "Creando…" : "Empezar a compartir"}
+        <button type="button" onClick={startSharing} disabled={busy} aria-busy={busy}>
+          {busy
+            ? `${busyStep === "wake" ? "Contactando servidor…" : "Creando sesión…"} ${formatMmSs(createElapsedMs)}`
+            : "Empezar a compartir"}
         </button>
+        {busy ? (
+          <div style={{ marginTop: "0.65rem" }}>
+            <div
+              className="create-room-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(100, Math.round((createElapsedMs / createWorstMs) * 100))}
+              aria-label="Progreso aproximado de la petición al servidor"
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, (createElapsedMs / createWorstMs) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="muted" style={{ marginTop: "0.5rem", marginBottom: 0, fontSize: "0.85rem" }}>
+              {busyStep === "wake"
+                ? "Paso 1/2: comprobar /health (en Render gratis puede tardar varios minutos si el servicio estaba dormido)."
+                : "Paso 2/2: crear la sesión."}{" "}
+              {formatMmSs(createElapsedMs)} · tope aprox. total {formatMmSs(createWorstMs)}.
+            </p>
+            <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0, fontSize: "0.85rem" }}>
+              <a href={healthCheckUrl()} target="_blank" rel="noreferrer">
+                Abrir comprobación del API
+              </a>{" "}
+              en otra pestaña si querés ver si ya responde “ok”.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -111,6 +214,15 @@ export function Home() {
           </button>
         </div>
       </div>
+
+      <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
+        <strong>Si “no hace nada” o tarda mucho:</strong> en plan gratis Render apaga el servicio; la primera
+        petición lo enciende y puede demorar. En el panel de Render comprobá que el web service esté{" "}
+        <em>Live</em> y que la URL sea la misma que en <code>vercel.json</code> y{" "}
+        <code>config/deploy-urls.json</code>. En Vercel podés <strong>quitar</strong>{" "}
+        <code>VITE_API_ORIGIN</code> para que el API vaya por tu dominio (<code>/api</code> → rewrite); la
+        clave es que el backend en Render responda.
+      </p>
 
       <InstallAppHint />
     </div>

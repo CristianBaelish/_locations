@@ -1,5 +1,7 @@
 /** Open-Meteo sin API key; CORS permitido desde el navegador. */
 
+import { fetchWithTimeout } from "./apiBase";
+
 export type SharerWeatherContext = {
   temperatureC: number;
   apparentC: number | null;
@@ -32,7 +34,7 @@ export async function fetchSharerWeatherContext(lat: number, lng: number): Promi
   url.searchParams.set("current", "temperature_2m,apparent_temperature,weather_code,is_day");
   url.searchParams.set("timezone", "auto");
 
-  const res = await fetch(url.toString());
+  const res = await fetchWithTimeout(url.toString(), { timeoutMs: 15_000 });
   if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
 
   const j = (await res.json()) as {

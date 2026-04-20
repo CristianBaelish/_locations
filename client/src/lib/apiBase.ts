@@ -1,47 +1,74 @@
 /**
- * Origen del backend Node (REST + Socket.io en Render u otro host).
- * - Dev sin env: `undefined` → el front usa rutas relativas `/api` (proxy de Vite).
- * - `VITE_API_ORIGIN`: URL sin barra final.
- * - Build en Vercel sin env: mismo host que el rewrite de `/api` en `vercel.json`.
+ * Backend (Node en Render, etc.)
+ *
+ * - Sin `VITE_API_ORIGIN`: el cliente usa rutas relativas `/api` y `/health` — **mismo origen que la página**
+ *   (p. ej. `https://locationspov.vercel.app/api/...`). Vercel reescribe eso a Render según `vercel.json`.
+ * - Con `VITE_API_ORIGIN`: REST y comprobación de salud van a esa URL (override explícito).
+ * - Socket.io no puede usar el mismo truco que un GET; si no hay override, en producción conecta al host
+ *   de `VITE_DEFAULT_RENDER_BACKEND` (misma base que `destination` en `vercel.json`, ver `config/deploy-urls.json`).
  */
-/** Mismo host que `destination` del rewrite `/api` en `vercel.json` (fallback si el build no inyectó `VERCEL=1`). */
-const VERCEL_DEFAULT_BACKEND = "https://locationsbaelish.onrender.com";
+function defaultRenderBackend(): string {
+  const v = import.meta.env.VITE_DEFAULT_RENDER_BACKEND;
+  if (typeof v === "string" && v.trim().length > 0) {
+    return v.trim().replace(/\/$/, "");
+  }
+  return "https://locationsbaelish.onrender.com";
+}
 
-export function syncServerOrigin(): string | undefined {
+/** URL del API solo si la definís en el build; si no, vacío = mismo origen que el HTML. */
+export function explicitBackendOrigin(): string | undefined {
   const o = import.meta.env.VITE_API_ORIGIN;
   if (typeof o === "string" && o.trim().length > 0) {
     return o.trim().replace(/\/$/, "");
-  }
-  if (import.meta.env.VITE_BUILT_ON_VERCEL === "1") {
-    return VERCEL_DEFAULT_BACKEND;
-  }
-  if (import.meta.env.PROD && typeof window !== "undefined") {
-    const h = window.location.hostname;
-    if (h === "vercel.app" || h.endsWith(".vercel.app")) {
-      return VERCEL_DEFAULT_BACKEND;
-    }
   }
   return undefined;
 }
 
 /**
  * Base para `fetch` al API REST.
- * Misma URL que Socket.io: en producción va directo al backend (CORS en Express), no al rewrite de Vercel.
- * Así se evitan peticiones colgadas al proxy y cold starts largos sin feedback.
+ * Por defecto cadena vacía → `fetch("/api/...")` respecto a `locationspov.vercel.app` (o el dominio que uses).
  */
 export function apiBase(): string {
-  return syncServerOrigin() ?? "";
+  return explicitBackendOrigin() ?? "";
 }
 
-/** URL para ver si el backend responde (texto `ok`). En Vercel debe existir rewrite de `/health` en `vercel.json`. */
+/**
+ * Origen para Socket.io (siempre absoluto salvo dev + proxy de Vite).
+ */
+export function socketServerOrigin(): string | undefined {
+  const explicit = explicitBackendOrigin();
+  if (explicit) return explicit;
+  if (import.meta.env.DEV) return undefined;
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname;
+    if (h === "localhost" || h === "127.0.0.1") return undefined;
+  }
+  return defaultRenderBackend();
+}
+
+/** `/health` en el mismo sitio que la app, o en el backend explícito. */
 export function healthCheckUrl(): string {
-  const o = syncServerOrigin();
+  const o = explicitBackendOrigin();
   if (o) return `${o}/health`;
   if (typeof window !== "undefined") return `${window.location.origin}/health`;
   return "/health";
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
+
+/** GET /health antes del POST para “despertar” Render gratis (el primer request suele ser el más lento). */
+export const HEALTH_WAKE_TIMEOUT_MS = 180_000;
+
+/** Tras el wake, crear sala (segundo request ya en proceso caliente). */
+export const CREATE_ROOM_TIMEOUT_MS = 90_000;
+
+/** Pausa entre reintentos tras un timeout (AbortError) en el POST. */
+export const CREATE_ROOM_RETRY_GAP_MS = 2000;
+
+/** Peor caso aprox. para la barra de progreso: wake + 2×POST + pausa. */
+export function createRoomWorstCaseMs(): number {
+  return HEALTH_WAKE_TIMEOUT_MS + CREATE_ROOM_TIMEOUT_MS * 2 + CREATE_ROOM_RETRY_GAP_MS;
+}
 
 /** `fetch` con tope de tiempo (Render asleep puede tardar; sin esto el botón queda en "Creando…" indefinidamente). */
 export async function fetchWithTimeout(
