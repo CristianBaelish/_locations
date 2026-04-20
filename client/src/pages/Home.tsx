@@ -5,10 +5,10 @@ import {
   CREATE_ROOM_RETRY_GAP_MS,
   CREATE_ROOM_TIMEOUT_MS,
   createRoomWorstCaseMs,
-  fetchWithTimeout,
   HEALTH_WAKE_TIMEOUT_MS,
   healthCheckUrl,
 } from "../lib/apiBase";
+import { xhrGet, xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
 
 function isAbortError(e: unknown): boolean {
@@ -39,6 +39,9 @@ export function Home() {
   const [err, setErr] = useState<string | null>(null);
   const [createElapsedMs, setCreateElapsedMs] = useState(0);
   const [busyStep, setBusyStep] = useState<"wake" | "post" | null>(null);
+  /** readyState ≥ 2: el servidor ya envió cabeceras HTTP (algo respondió). */
+  const [wakeHeadersSeen, setWakeHeadersSeen] = useState(false);
+  const [postHeadersSeen, setPostHeadersSeen] = useState(false);
 
   const createWorstMs = createRoomWorstCaseMs();
 
@@ -57,6 +60,8 @@ export function Home() {
   async function startSharing() {
     setBusy(true);
     setBusyStep("wake");
+    setWakeHeadersSeen(false);
+    setPostHeadersSeen(false);
     setErr(null);
     const base = apiBase();
     const url = `${base}/api/rooms`;
@@ -68,11 +73,8 @@ export function Home() {
       }
 
       const healthUrl = healthCheckUrl();
-      const wakeRes = await fetchWithTimeout(healthUrl, {
-        method: "GET",
-        timeoutMs: HEALTH_WAKE_TIMEOUT_MS,
-      });
-      const wakeBody = (await wakeRes.text()).trim();
+      const wakeRes = await xhrGet(healthUrl, HEALTH_WAKE_TIMEOUT_MS, () => setWakeHeadersSeen(true));
+      const wakeBody = wakeRes.text.trim();
       if (!wakeRes.ok) {
         throw new Error(
           `El servidor no respondió bien al despertar (${wakeRes.status}). Abrí ${healthUrl} en otra pestaña: tiene que verse la palabra ok. Revisá el servicio en Render (no suspendido, URL correcta).`
@@ -85,14 +87,16 @@ export function Home() {
       }
 
       setBusyStep("post");
+      setPostHeadersSeen(false);
       const postRoom = () =>
-        fetchWithTimeout(url, { method: "POST", timeoutMs: CREATE_ROOM_TIMEOUT_MS });
+        xhrPost(url, CREATE_ROOM_TIMEOUT_MS, () => setPostHeadersSeen(true));
 
-      let res: Response;
+      let res: Awaited<ReturnType<typeof xhrPost>>;
       try {
         res = await postRoom();
       } catch (e) {
         if (isAbortError(e)) {
+          setPostHeadersSeen(false);
           await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
           res = await postRoom();
         } else {
@@ -101,25 +105,41 @@ export function Home() {
       }
 
       if (!res.ok) {
-        const snippet = (await res.text()).slice(0, 120);
+        const snippet = res.text.slice(0, 120);
         throw new Error(
           `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el servicio en Render esté en marcha y que en Vercel existan los rewrites de /api (o definí VITE_API_ORIGIN con https://… sin barra final)." }`
         );
       }
-      const data = (await res.json()) as { roomId?: string };
+      let data: { roomId?: string };
+      try {
+        data = JSON.parse(res.text) as { roomId?: string };
+      } catch {
+        throw new Error("Respuesta inválida del servidor (no es JSON).");
+      }
       if (!data.roomId) throw new Error("Respuesta inválida del servidor");
       navigate(`/s/${data.roomId}`);
     } catch (e) {
-      const msg = isAbortError(e)
-        ? `Tiempo de espera agotado (hasta ~${formatApproxMinutes(createWorstMs)}: despertar servidor + crear sala). En Render gratis el primer arranque puede tardar varios minutos. Abrí ${healthCheckUrl()} en otra pestaña hasta ver ok; si no aparece, entrá al panel de Render y revisá que el servicio esté activo y la URL coincida con la de este proyecto.`
-        : e instanceof TypeError && String(e.message).includes("fetch")
-          ? `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`
-          : e instanceof Error
-            ? e.message
-            : "Error";
+      const noConn = `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`;
+      let msg: string;
+      if (isAbortError(e)) {
+        msg = `Tiempo de espera agotado (hasta ~${formatApproxMinutes(createWorstMs)}: despertar servidor + crear sala). En Render gratis el primer arranque puede tardar varios minutos. Abrí ${healthCheckUrl()} en otra pestaña hasta ver ok; si no aparece, entrá al panel de Render y revisá que el servicio esté activo y la URL coincida con la de este proyecto.`;
+      } else if (
+        e instanceof TypeError &&
+        String(e.message).includes("fetch")
+      ) {
+        msg = noConn;
+      } else if (e instanceof Error && e.message.includes("Error de red")) {
+        msg = noConn;
+      } else if (e instanceof Error) {
+        msg = e.message;
+      } else {
+        msg = "Error";
+      }
       setErr(msg);
     } finally {
       setBusyStep(null);
+      setWakeHeadersSeen(false);
+      setPostHeadersSeen(false);
       setBusy(false);
     }
   }
@@ -182,9 +202,27 @@ export function Home() {
               />
             </div>
             <p className="muted" style={{ marginTop: "0.5rem", marginBottom: 0, fontSize: "0.85rem" }}>
-              {busyStep === "wake"
-                ? "Paso 1/2: comprobar /health (en Render gratis puede tardar varios minutos si el servicio estaba dormido)."
-                : "Paso 2/2: crear la sesión."}{" "}
+              {busyStep === "wake" ? (
+                wakeHeadersSeen ? (
+                  <>
+                    <strong>Servidor ya contestó</strong> (hubo respuesta HTTP). Comprobando texto de /health…{" "}
+                  </>
+                ) : (
+                  <>
+                    <strong>Aún sin la primera respuesta HTTP</strong> — el pedido sigue en curso (Render gratis
+                    puede tardar minutos si estaba dormido). Si el reloj sube y esto no cambia a “Servidor ya
+                    contestó”, entonces no hay respuesta: revisá URL del API y el panel de Render.{" "}
+                  </>
+                )
+              ) : postHeadersSeen ? (
+                <>
+                  <strong>Servidor ya contestó</strong> al crear la sala. Leyendo respuesta…{" "}
+                </>
+              ) : (
+                <>
+                  <strong>Esperando respuesta</strong> del POST /api/rooms…{" "}
+                </>
+              )}
               {formatMmSs(createElapsedMs)} · tope aprox. total {formatMmSs(createWorstMs)}.
             </p>
             <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0, fontSize: "0.85rem" }}>
@@ -216,12 +254,12 @@ export function Home() {
       </div>
 
       <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
-        <strong>Si “no hace nada” o tarda mucho:</strong> en plan gratis Render apaga el servicio; la primera
-        petición lo enciende y puede demorar. En el panel de Render comprobá que el web service esté{" "}
-        <em>Live</em> y que la URL sea la misma que en <code>vercel.json</code> y{" "}
-        <code>config/deploy-urls.json</code>. En Vercel podés <strong>quitar</strong>{" "}
-        <code>VITE_API_ORIGIN</code> para que el API vaya por tu dominio (<code>/api</code> → rewrite); la
-        clave es que el backend en Render responda.
+        <strong>Si tarda, da error o ves 502 en /health:</strong> 502 en Render suele ser el proxy sin proceso
+        detrás (deploy fallido, comando de arranque mal, o carpeta raíz incorrecta: tiene que ejecutarse{" "}
+        <code>server</code> con <code>npm start</code> → <code>node src/index.js</code>). Revisá{" "}
+        <em>Logs</em> y <em>Events</em> en Render. En plan gratis la primera petición tras inactividad puede
+        tardar mucho. La URL del API debe coincidir con <code>vercel.json</code> y{" "}
+        <code>config/deploy-urls.json</code>.
       </p>
 
       <InstallAppHint />
