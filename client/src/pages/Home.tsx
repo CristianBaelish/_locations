@@ -5,6 +5,7 @@ import {
   CREATE_ROOM_RETRY_GAP_MS,
   CREATE_ROOM_TIMEOUT_MS,
   createRoomWorstCaseMs,
+  HEALTH_WAKE_MAX_ATTEMPTS,
   HEALTH_WAKE_TIMEOUT_MS,
   healthCheckUrl,
 } from "../lib/apiBase";
@@ -73,7 +74,20 @@ export function Home() {
       }
 
       const healthUrl = healthCheckUrl();
-      const wakeRes = await xhrGet(healthUrl, HEALTH_WAKE_TIMEOUT_MS, () => setWakeHeadersSeen(true));
+      let wakeRes: Awaited<ReturnType<typeof xhrGet>> | undefined;
+      for (let wakeAttempt = 0; wakeAttempt < HEALTH_WAKE_MAX_ATTEMPTS; wakeAttempt++) {
+        if (wakeAttempt > 0) {
+          setWakeHeadersSeen(false);
+          await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
+        }
+        try {
+          wakeRes = await xhrGet(healthUrl, HEALTH_WAKE_TIMEOUT_MS, () => setWakeHeadersSeen(true));
+          break;
+        } catch (e) {
+          if (!isAbortError(e) || wakeAttempt === HEALTH_WAKE_MAX_ATTEMPTS - 1) throw e;
+        }
+      }
+      if (!wakeRes) throw new Error("No hubo respuesta del wake interno.");
       const wakeBody = wakeRes.text.trim();
       if (!wakeRes.ok) {
         throw new Error(
@@ -107,7 +121,7 @@ export function Home() {
       if (!res.ok) {
         const snippet = res.text.slice(0, 120);
         throw new Error(
-          `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el servicio en Render esté en marcha y que en Vercel existan los rewrites de /api (o definí VITE_API_ORIGIN con https://… sin barra final)." }`
+          `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el servicio en Render esté en marcha y que config/deploy-urls.json (o VITE_DEFAULT_RENDER_BACKEND en Vercel) coincida con la URL del panel; o definí VITE_API_ORIGIN con https://… sin barra final." }`
         );
       }
       let data: { roomId?: string };
@@ -209,9 +223,10 @@ export function Home() {
                   </>
                 ) : (
                   <>
-                    <strong>Aún sin la primera respuesta HTTP</strong> — el pedido sigue en curso (Render gratis
-                    puede tardar minutos si estaba dormido). Si el reloj sube y esto no cambia a “Servidor ya
-                    contestó”, entonces no hay respuesta: revisá URL del API y el panel de Render.{" "}
+                    <strong>Aún sin la primera respuesta HTTP</strong> — el pedido va directo a Render (sin proxy
+                    de Vercel). En plan gratis el cold start puede tardar varios minutos. Si no llega nunca a
+                    “Servidor ya contestó”, revisá la URL en Render y en{" "}
+                    <code>config/deploy-urls.json</code>.{" "}
                   </>
                 )
               ) : postHeadersSeen ? (

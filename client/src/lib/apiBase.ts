@@ -1,11 +1,12 @@
 /**
  * Backend (Node en Render, etc.)
  *
- * - Sin `VITE_API_ORIGIN`: el cliente usa rutas relativas `/api` y `/health` — **mismo origen que la página**
- *   (p. ej. `https://locationspov.vercel.app/api/...`). Vercel reescribe eso a Render según `vercel.json`.
- * - Con `VITE_API_ORIGIN`: REST y comprobación de salud van a esa URL (override explícito).
- * - Socket.io no puede usar el mismo truco que un GET; si no hay override, en producción conecta al host
- *   de `VITE_DEFAULT_RENDER_BACKEND` (misma base que `destination` en `vercel.json`, ver `config/deploy-urls.json`).
+ * - En **desarrollo** (`vite`): sin `VITE_API_ORIGIN`, rutas relativas `/api` y `/health` → proxy de Vite al puerto local.
+ * - En **producción** (build): sin overrides, el cliente llama directo a `VITE_DEFAULT_RENDER_BACKEND` (Render).
+ *   Así evitamos el proxy de Vercel (`vercel.json` rewrites): tiene tope ~2 min hacia orígenes externos y el
+ *   cold start de Render gratis puede superarlo, dejando el wake sin cabeceras HTTP.
+ * - Con `VITE_API_ORIGIN`: REST, `/health` y (vía `socketServerOrigin`) Socket.io usan esa base.
+ * - `vercel.json` sigue siendo útil para previews o si alguien fuerza rutas relativas en otro despliegue.
  */
 function defaultRenderBackend(): string {
   const v = import.meta.env.VITE_DEFAULT_RENDER_BACKEND;
@@ -15,7 +16,7 @@ function defaultRenderBackend(): string {
   return "https://locationsbaelish.onrender.com";
 }
 
-/** URL del API solo si la definís en el build; si no, vacío = mismo origen que el HTML. */
+/** Override explícito de la URL del API (si no, en prod se usa `defaultRenderBackend`). */
 export function explicitBackendOrigin(): string | undefined {
   const o = import.meta.env.VITE_API_ORIGIN;
   if (typeof o === "string" && o.trim().length > 0) {
@@ -25,11 +26,14 @@ export function explicitBackendOrigin(): string | undefined {
 }
 
 /**
- * Base para `fetch` al API REST.
- * Por defecto cadena vacía → `fetch("/api/...")` respecto a `locationspov.vercel.app` (o el dominio que uses).
+ * Base para `fetch` / XHR al API REST.
+ * En prod sin override → mismo host que Socket.io (`defaultRenderBackend`), no el origen de la página.
  */
 export function apiBase(): string {
-  return explicitBackendOrigin() ?? "";
+  const explicit = explicitBackendOrigin();
+  if (explicit) return explicit;
+  if (import.meta.env.PROD) return defaultRenderBackend();
+  return "";
 }
 
 /**
@@ -46,28 +50,38 @@ export function socketServerOrigin(): string | undefined {
   return defaultRenderBackend();
 }
 
-/** `/health` en el mismo sitio que la app, o en el backend explícito. */
+/** URL absoluta de GET `/health` (wake de Render, enlace de diagnóstico). */
 export function healthCheckUrl(): string {
   const o = explicitBackendOrigin();
   if (o) return `${o}/health`;
+  if (import.meta.env.PROD) return `${defaultRenderBackend()}/health`;
   if (typeof window !== "undefined") return `${window.location.origin}/health`;
   return "/health";
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
 
-/** GET /health antes del POST para “despertar” Render gratis (el primer request suele ser el más lento). */
-export const HEALTH_WAKE_TIMEOUT_MS = 180_000;
+/**
+ * GET /health por intento — Render gratis a veces tarda varios minutos en frío; un solo tope corto falla con AbortError.
+ */
+export const HEALTH_WAKE_TIMEOUT_MS = 240_000;
+
+/** Tras un timeout del wake, se reintenta GET /health (nueva conexión TCP). */
+export const HEALTH_WAKE_MAX_ATTEMPTS = 2;
 
 /** Tras el wake, crear sala (segundo request ya en proceso caliente). */
-export const CREATE_ROOM_TIMEOUT_MS = 90_000;
+export const CREATE_ROOM_TIMEOUT_MS = 120_000;
 
-/** Pausa entre reintentos tras un timeout (AbortError) en el POST. */
+/** Pausa entre reintentos tras un timeout (AbortError) en wake o POST. */
 export const CREATE_ROOM_RETRY_GAP_MS = 2000;
 
-/** Peor caso aprox. para la barra de progreso: wake + 2×POST + pausa. */
+/** Peor caso aprox. para la barra de progreso: N×wake + POST con un reintento + pausas. */
 export function createRoomWorstCaseMs(): number {
-  return HEALTH_WAKE_TIMEOUT_MS + CREATE_ROOM_TIMEOUT_MS * 2 + CREATE_ROOM_RETRY_GAP_MS;
+  const wakeBlock =
+    HEALTH_WAKE_TIMEOUT_MS * HEALTH_WAKE_MAX_ATTEMPTS +
+    CREATE_ROOM_RETRY_GAP_MS * Math.max(0, HEALTH_WAKE_MAX_ATTEMPTS - 1);
+  const postBlock = CREATE_ROOM_TIMEOUT_MS * 2 + CREATE_ROOM_RETRY_GAP_MS;
+  return wakeBlock + postBlock;
 }
 
 /** `fetch` con tope de tiempo (Render asleep puede tardar; sin esto el botón queda en "Creando…" indefinidamente). */

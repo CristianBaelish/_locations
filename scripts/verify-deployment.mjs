@@ -74,7 +74,8 @@ async function checkHealth(label, url, timeoutMs) {
   }
 }
 
-const timeoutMs = 180_000;
+/** Debe cubrir cold start de Render (el cliente usa hasta 2×240s en /health). */
+const timeoutMs = 500_000;
 let ok = true;
 ok = (await checkHealth("Render directo", `${renderOrigin}/health`, timeoutMs)) && ok;
 ok = (await checkHealth("Vercel (rewrite)", `${publicOrigin}/health`, timeoutMs)) && ok;

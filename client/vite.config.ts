@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
   for (const [key, value] of Object.entries(merged)) {
     define[`import.meta.env.${key}`] = JSON.stringify(value);
   }
-  /** En el build de Vercel, REST va por mismo origen + rewrite → evita "Failed to fetch" por CORS hacia Render */
+  /** Marcador de build en Vercel (p. ej. telemetría futura); el API en prod va directo a Render (ver `apiBase.ts`). */
   define["import.meta.env.VITE_BUILT_ON_VERCEL"] = JSON.stringify(
     process.env.VERCEL === "1" ? "1" : "0"
   );

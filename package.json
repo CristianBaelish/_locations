@@ -8,6 +8,7 @@
   "scripts": {
     "start": "npm run start -w server",
     "build": "npm run build -w client",
+    "ship": "node scripts/push-main.mjs",
     "verify:deploy": "node scripts/verify-deployment.mjs",
     "verify:deploy:probe": "node scripts/verify-deployment.mjs --probe",
     "probe:timing": "node scripts/probe-timing.mjs",
