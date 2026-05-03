@@ -1,3 +1,5 @@
+Guía detallada con capturas de pantalla en texto: ver archivo DEPLOY-RENDER.md en el repo.
+
 === Opción A (recomendada): TODO en un solo Render ===
 
 Una URL para mapas + API + WebSocket. Sin Vercel, sin DNS raro a *.onrender.com desde el navegador

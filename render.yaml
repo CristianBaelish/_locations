@@ -1,9 +1,17 @@
-# Opción recomendada: un solo Web Service en Render (SPA + API + Socket.io en la misma URL).
-# New → Blueprint → conectá el repo, o creá Web Service manual con los mismos comandos desde la raíz del repo.
+# Blueprint de Render: crea el Web Service al conectar el repo (New → Blueprint).
+# Documentación paso a paso: DEPLOY-RENDER.md
 services:
   - type: web
     name: live-street-pov
-    env: node
+    runtime: node
     plan: free
+    region: oregon
+    branch: main
     buildCommand: npm ci && npm run build
     startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_GOOGLE_MAPS_API_KEY
+        sync: false
