@@ -1,0 +1,9 @@
+# Opción recomendada: un solo Web Service en Render (SPA + API + Socket.io en la misma URL).
+# New → Blueprint → conectá el repo, o creá Web Service manual con los mismos comandos desde la raíz del repo.
+services:
+  - type: web
+    name: live-street-pov
+    env: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start

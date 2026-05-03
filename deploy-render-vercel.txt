@@ -1,34 +1,30 @@
-=== API en Render + front ya en Vercel ===
+=== Opción A (recomendada): TODO en un solo Render ===
 
-1) RENDER (servidor Node)
-   - New → Web Service → conectá el mismo repo de GitHub.
-   - Root Directory: server
-   - Runtime: Node
-   - Build Command: npm install
-   - Start Command: npm start
-   - Plan: Free
+Una URL para mapas + API + WebSocket. Sin Vercel, sin DNS raro a *.onrender.com desde el navegador
+(el cliente y el servidor son el mismo host).
 
-   Environment (Environment → Add):
-   - FRONTEND_URL = https://TU-PROYECTO.vercel.app
-     (sin barra al final; si tenés varios dominios, separados por coma)
-   - NODE_VERSION = 20   (opcional, en Settings → Environment)
+1) Render → New → Web Service (o Blueprint si usás render.yaml del repo).
+   - Conectá el repo de GitHub.
+   - Root Directory: vacío (raíz del repo), NO la carpeta "server" sola.
+   - Build Command:  npm ci && npm run build
+   - Start Command:  npm start
+   - Plan: Free (o de pago si querés evitar cold starts).
 
-   Deploy. Copiá la URL pública del servicio, ej:
-   https://live-pov-api.onrender.com
+2) Variables de entorno (Environment) en Render:
+   - VITE_GOOGLE_MAPS_API_KEY = tu clave (necesaria en el BUILD de Vite; Render la inyecta en build).
+   - FRONTEND_URL = opcional; si más adelante servís el front desde otro dominio, listalo acá separado por coma.
 
-2) VERCEL (variables del front)
-   - Project → Settings → Environment Variables
-   - Añadí o editá:
-     VITE_API_ORIGIN = https://live-pov-api.onrender.com
-     (sin barra final; debe ser exactamente la URL de Render — la usa Socket.io)
+3) Deploy. La URL será algo como https://TU-SERVICIO.onrender.com
+   - Abrí esa URL → tiene que cargar la app.
+   - https://TU-SERVICIO.onrender.com/health → tiene que decir ok.
 
-   - El repo incluye vercel.json: reescribe /api/* hacia Render para que el navegador no haga
-     peticiones cross-origin (evita "Failed to fetch" por CORS en POST /api/rooms).
-     Si cambiás la URL del servicio en Render, editá vercel.json y la línea destination.
+4) Vercel: podés dejar de usarlo para esta app, o redirigir el dominio custom a Render si lo tenés.
 
-   - Guardá y hacé "Redeploy" del último deployment (Deployments → ... → Redeploy).
+Nota: hubo un bug en el servidor: CORS usaba una función que nunca llamaba al callback de "cors",
+y las peticiones quedaban colgadas para siempre. Eso ya está corregido en server/src/index.js.
 
-3) Probar
-   - Abrí tu URL de Vercel → Empezar a compartir debe crear sesión sin error.
 
-Nota: en plan gratis Render "duerme" el servicio tras inactividad; el primer request puede tardar ~50s.
+=== Opción B: Front en Vercel + API en Render (más piezas en juego) ===
+
+Seguí la guía antigua solo si querés mantener dos hosts. Tenés que alinear vercel.json,
+config/deploy-urls.json y variables VITE_*.

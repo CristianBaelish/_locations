@@ -1,9 +1,13 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
 const app = express();
 
@@ -25,9 +29,12 @@ function originAllowed(origin) {
   return false;
 }
 
+/** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
 app.use(
   cors({
-    origin: originAllowed,
+    origin(origin, callback) {
+      callback(null, originAllowed(origin));
+    },
   })
 );
 app.use(express.json());
@@ -82,6 +89,19 @@ io.on("connection", (socket) => {
   });
 });
 
+/** Build del cliente (`npm run build` en la raíz del repo). Mismo host que la API → sin Vercel ni DNS a onrender aparte. */
+const clientDist = path.join(__dirname, "..", "..", "client", "dist");
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist, { index: false }));
+  app.get(/.*/, (req, res, next) => {
+    if (req.method !== "GET") return next();
+    if (req.path.startsWith("/socket.io")) return next();
+    if (req.path.startsWith("/api")) return next();
+    if (req.path === "/health") return next();
+    res.sendFile(path.join(clientDist, "index.html"), (err) => next(err));
+  });
+}
+
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server http://0.0.0.0:${PORT}`);
+  console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
 });
