@@ -224,6 +224,14 @@ export function Home() {
       </div>
 
       <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
+        <strong>Si /health o el API “cargan para siempre” (sin error, sin fin):</strong> a veces el DNS del
+        proveedor resuelve mal <code>*.onrender.com</code> (p. ej. agrega <code>.com.ar</code> y caés en otra
+        IP que no responde). Probá <strong>datos móviles</strong> o cambiá el DNS del Wi‑Fi a{" "}
+        <strong>1.1.1.1</strong> y <strong>1.0.0.1</strong> (Cloudflare) u <strong>8.8.8.8</strong> (Google) y
+        recargá la página.
+      </p>
+
+      <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
         <strong>Si tarda, da error o ves 502 en /health:</strong> 502 en Render suele ser el proxy sin proceso
         detrás (deploy fallido, comando de arranque mal, o carpeta raíz incorrecta: tiene que ejecutarse{" "}
         <code>server</code> con <code>npm start</code> → <code>node src/index.js</code>). Revisá{" "}
