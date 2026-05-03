@@ -2,14 +2,13 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   apiBase,
+  CREATE_ROOM_COLD_TIMEOUT_MS,
   CREATE_ROOM_RETRY_GAP_MS,
   CREATE_ROOM_TIMEOUT_MS,
   createRoomWorstCaseMs,
-  HEALTH_WAKE_MAX_ATTEMPTS,
-  HEALTH_WAKE_TIMEOUT_MS,
   healthCheckUrl,
 } from "../lib/apiBase";
-import { xhrGet, xhrPost } from "../lib/xhrRequest";
+import { xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
 
 function isAbortError(e: unknown): boolean {
@@ -39,10 +38,8 @@ export function Home() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [createElapsedMs, setCreateElapsedMs] = useState(0);
-  const [busyStep, setBusyStep] = useState<"wake" | "post" | null>(null);
-  /** readyState ≥ 2: el servidor ya envió cabeceras HTTP (algo respondió). */
-  const [wakeHeadersSeen, setWakeHeadersSeen] = useState(false);
-  const [postHeadersSeen, setPostHeadersSeen] = useState(false);
+  /** readyState ≥ 2 en el POST /api/rooms: el servidor ya envió cabeceras HTTP. */
+  const [createHeadersSeen, setCreateHeadersSeen] = useState(false);
 
   const createWorstMs = createRoomWorstCaseMs();
 
@@ -60,9 +57,7 @@ export function Home() {
 
   async function startSharing() {
     setBusy(true);
-    setBusyStep("wake");
-    setWakeHeadersSeen(false);
-    setPostHeadersSeen(false);
+    setCreateHeadersSeen(false);
     setErr(null);
     const base = apiBase();
     const url = `${base}/api/rooms`;
@@ -73,48 +68,23 @@ export function Home() {
         );
       }
 
-      const healthUrl = healthCheckUrl();
-      let wakeRes: Awaited<ReturnType<typeof xhrGet>> | undefined;
-      for (let wakeAttempt = 0; wakeAttempt < HEALTH_WAKE_MAX_ATTEMPTS; wakeAttempt++) {
-        if (wakeAttempt > 0) {
-          setWakeHeadersSeen(false);
-          await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
-        }
-        try {
-          wakeRes = await xhrGet(healthUrl, HEALTH_WAKE_TIMEOUT_MS, () => setWakeHeadersSeen(true));
-          break;
-        } catch (e) {
-          if (!isAbortError(e) || wakeAttempt === HEALTH_WAKE_MAX_ATTEMPTS - 1) throw e;
-        }
-      }
-      if (!wakeRes) throw new Error("No hubo respuesta del wake interno.");
-      const wakeBody = wakeRes.text.trim();
-      if (!wakeRes.ok) {
-        throw new Error(
-          `El servidor no respondió bien al despertar (${wakeRes.status}). Abrí ${healthUrl} en otra pestaña: tiene que verse la palabra ok. Revisá el servicio en Render (no suspendido, URL correcta).`
-        );
-      }
-      if (wakeBody !== "ok") {
-        throw new Error(
-          `Se esperaba "ok" en /health y se recibió otra cosa. Revisá Render y la variable VITE_API_ORIGIN en Vercel (sin barra final, mismo host que el panel de Render).`
-        );
-      }
-
-      setBusyStep("post");
-      setPostHeadersSeen(false);
-      const postRoom = () =>
-        xhrPost(url, CREATE_ROOM_TIMEOUT_MS, () => setPostHeadersSeen(true));
+      const postOnce = (timeoutMs: number) =>
+        xhrPost(url, timeoutMs, () => setCreateHeadersSeen(true));
 
       let res: Awaited<ReturnType<typeof xhrPost>>;
       try {
-        res = await postRoom();
+        res = await postOnce(CREATE_ROOM_COLD_TIMEOUT_MS);
       } catch (e) {
-        if (isAbortError(e)) {
-          setPostHeadersSeen(false);
+        if (!isAbortError(e)) throw e;
+        setCreateHeadersSeen(false);
+        await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
+        try {
+          res = await postOnce(CREATE_ROOM_TIMEOUT_MS);
+        } catch (e2) {
+          if (!isAbortError(e2)) throw e2;
+          setCreateHeadersSeen(false);
           await new Promise((r) => window.setTimeout(r, CREATE_ROOM_RETRY_GAP_MS));
-          res = await postRoom();
-        } else {
-          throw e;
+          res = await postOnce(CREATE_ROOM_TIMEOUT_MS);
         }
       }
 
@@ -136,7 +106,7 @@ export function Home() {
       const noConn = `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`;
       let msg: string;
       if (isAbortError(e)) {
-        msg = `Tiempo de espera agotado (hasta ~${formatApproxMinutes(createWorstMs)}: despertar servidor + crear sala). En Render gratis el primer arranque puede tardar varios minutos. Abrí ${healthCheckUrl()} en otra pestaña hasta ver ok; si no aparece, entrá al panel de Render y revisá que el servicio esté activo y la URL coincida con la de este proyecto.`;
+        msg = `Tiempo de espera agotado (hasta ~${formatApproxMinutes(createWorstMs)} en el peor caso). En Render gratis el arranque en frío puede tardar mucho. Abrí ${healthCheckUrl()} en otra pestaña: tiene que verse ok. Si instalaste la app (PWA) o tenés el sitio abierto hace días, cerrá todas las pestañas y volvé a entrar para cargar la última versión del cliente.`;
       } else if (
         e instanceof TypeError &&
         String(e.message).includes("fetch")
@@ -151,9 +121,7 @@ export function Home() {
       }
       setErr(msg);
     } finally {
-      setBusyStep(null);
-      setWakeHeadersSeen(false);
-      setPostHeadersSeen(false);
+      setCreateHeadersSeen(false);
       setBusy(false);
     }
   }
@@ -195,9 +163,7 @@ export function Home() {
         <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Compartir recorrido</h2>
         <p className="muted">Genera un enlace y permite el GPS en el navegador.</p>
         <button type="button" onClick={startSharing} disabled={busy} aria-busy={busy}>
-          {busy
-            ? `${busyStep === "wake" ? "Contactando servidor…" : "Creando sesión…"} ${formatMmSs(createElapsedMs)}`
-            : "Empezar a compartir"}
+          {busy ? `Creando sesión… ${formatMmSs(createElapsedMs)}` : "Empezar a compartir"}
         </button>
         {busy ? (
           <div style={{ marginTop: "0.65rem" }}>
@@ -216,26 +182,15 @@ export function Home() {
               />
             </div>
             <p className="muted" style={{ marginTop: "0.5rem", marginBottom: 0, fontSize: "0.85rem" }}>
-              {busyStep === "wake" ? (
-                wakeHeadersSeen ? (
-                  <>
-                    <strong>Servidor ya contestó</strong> (hubo respuesta HTTP). Comprobando texto de /health…{" "}
-                  </>
-                ) : (
-                  <>
-                    <strong>Aún sin la primera respuesta HTTP</strong> — el pedido va directo a Render (sin proxy
-                    de Vercel). En plan gratis el cold start puede tardar varios minutos. Si no llega nunca a
-                    “Servidor ya contestó”, revisá la URL en Render y en{" "}
-                    <code>config/deploy-urls.json</code>.{" "}
-                  </>
-                )
-              ) : postHeadersSeen ? (
+              {createHeadersSeen ? (
                 <>
-                  <strong>Servidor ya contestó</strong> al crear la sala. Leyendo respuesta…{" "}
+                  <strong>Servidor ya contestó</strong> (POST /api/rooms). Leyendo respuesta…{" "}
                 </>
               ) : (
                 <>
-                  <strong>Esperando respuesta</strong> del POST /api/rooms…{" "}
+                  <strong>Sin respuesta HTTP todavía</strong> — una sola petición a Render (sin GET /health previo).
+                  En plan gratis el cold start puede tardar varios minutos; no cierres la pestaña. Si nunca avanza,
+                  revisá la URL del servicio y <code>config/deploy-urls.json</code>.{" "}
                 </>
               )}
               {formatMmSs(createElapsedMs)} · tope aprox. total {formatMmSs(createWorstMs)}.

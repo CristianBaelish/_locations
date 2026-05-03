@@ -62,26 +62,25 @@ export function healthCheckUrl(): string {
 const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
 
 /**
- * GET /health por intento — Render gratis a veces tarda varios minutos en frío; un solo tope corto falla con AbortError.
+ * Primer POST /api/rooms: una sola conexión hasta respuesta — cubre cold start de Render sin “GET /health”
+ * que agota el timeout justo antes de que el proceso termine de levantar (dos fases en serie eran frágiles).
  */
-export const HEALTH_WAKE_TIMEOUT_MS = 240_000;
+export const CREATE_ROOM_COLD_TIMEOUT_MS = 600_000;
 
-/** Tras un timeout del wake, se reintenta GET /health (nueva conexión TCP). */
-export const HEALTH_WAKE_MAX_ATTEMPTS = 2;
-
-/** Tras el wake, crear sala (segundo request ya en proceso caliente). */
+/** Reintentos tras cold post (servidor ya debería estar arriba). */
 export const CREATE_ROOM_TIMEOUT_MS = 120_000;
 
-/** Pausa entre reintentos tras un timeout (AbortError) en wake o POST. */
+/** Pausa entre reintentos tras un timeout (AbortError). */
 export const CREATE_ROOM_RETRY_GAP_MS = 2000;
 
-/** Peor caso aprox. para la barra de progreso: N×wake + POST con un reintento + pausas. */
+/** Peor caso aprox. para la barra de progreso: cold POST + 2×POST templado + pausas. */
 export function createRoomWorstCaseMs(): number {
-  const wakeBlock =
-    HEALTH_WAKE_TIMEOUT_MS * HEALTH_WAKE_MAX_ATTEMPTS +
-    CREATE_ROOM_RETRY_GAP_MS * Math.max(0, HEALTH_WAKE_MAX_ATTEMPTS - 1);
-  const postBlock = CREATE_ROOM_TIMEOUT_MS * 2 + CREATE_ROOM_RETRY_GAP_MS;
-  return wakeBlock + postBlock;
+  return (
+    CREATE_ROOM_COLD_TIMEOUT_MS +
+    CREATE_ROOM_RETRY_GAP_MS +
+    CREATE_ROOM_TIMEOUT_MS * 2 +
+    CREATE_ROOM_RETRY_GAP_MS * 2
+  );
 }
 
 /** `fetch` con tope de tiempo (Render asleep puede tardar; sin esto el botón queda en "Creando…" indefinidamente). */

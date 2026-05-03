@@ -85,6 +85,9 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          /** Sin esto, el SW viejo puede seguir sirviendo JS con lógica antigua (URLs/timeouts) hasta cerrar todas las pestañas. */
+          skipWaiting: true,
+          clientsClaim: true,
           globPatterns: ["**/*.{js,css,html,ico,svg,png,woff2}"],
           navigateFallback: "/index.html",
           /** No servir el SPA HTML para rutas `/api` (evita respuestas raras si el SW intercepta). */

@@ -14,7 +14,7 @@ const deploy = JSON.parse(readFileSync(join(root, "config", "deploy-urls.json"),
 
 const render = deploy.renderBackendOrigin.replace(/\/$/, "");
 const vercel = deploy.vercelPublicOrigin.replace(/\/$/, "");
-const TIMEOUT_MS = 300_000;
+const TIMEOUT_MS = 600_000;
 
 async function timed(label, fn) {
   const t0 = Date.now();
