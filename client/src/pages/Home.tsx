@@ -188,9 +188,9 @@ export function Home() {
                 </>
               ) : (
                 <>
-                  <strong>Sin respuesta HTTP todavía</strong> — una sola petición a Render (sin GET /health previo).
-                  En plan gratis el cold start puede tardar varios minutos; no cierres la pestaña. Si nunca avanza,
-                  revisá la URL del servicio y <code>config/deploy-urls.json</code>.{" "}
+                  <strong>Sin respuesta HTTP todavía</strong> — el POST sale desde tu dominio en Vercel hacia Render
+                  (sin GET /health previo). En plan gratis el cold start puede tardar varios minutos; no cierres la
+                  pestaña. Si se corta ~2 min, puede ser el tope del proxy de Vercel: reintentá.{" "}
                 </>
               )}
               {formatMmSs(createElapsedMs)} · tope aprox. total {formatMmSs(createWorstMs)}.
@@ -224,11 +224,10 @@ export function Home() {
       </div>
 
       <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
-        <strong>Si /health o el API “cargan para siempre” (sin error, sin fin):</strong> a veces el DNS del
-        proveedor resuelve mal <code>*.onrender.com</code> (p. ej. agrega <code>.com.ar</code> y caés en otra
-        IP que no responde). Probá <strong>datos móviles</strong> o cambiá el DNS del Wi‑Fi a{" "}
-        <strong>1.1.1.1</strong> y <strong>1.0.0.1</strong> (Cloudflare) u <strong>8.8.8.8</strong> (Google) y
-        recargá la página.
+        <strong>Si un enlace directo a <code>*.onrender.com</code> “carga para siempre”:</strong> puede ser el
+        DNS del operador (p. ej. sufijo <code>.com.ar</code>). La app usa <strong>tu dominio en Vercel</strong>{" "}
+        para API, <code>/health</code> y Socket.io; probá el botón de arriba o cambiá DNS a{" "}
+        <strong>1.1.1.1</strong> / <strong>8.8.8.8</strong> si algo sigue fallando.
       </p>
 
       <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>

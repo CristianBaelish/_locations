@@ -5,6 +5,10 @@
   "outputDirectory": "client/dist",
   "rewrites": [
     {
+      "source": "/socket.io/:path*",
+      "destination": "https://locationsbaelish.onrender.com/socket.io/:path*"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://locationsbaelish.onrender.com/api/:path*"
     },

@@ -91,7 +91,7 @@ export default defineConfig(({ mode }) => {
           globPatterns: ["**/*.{js,css,html,ico,svg,png,woff2}"],
           navigateFallback: "/index.html",
           /** No servir el SPA HTML para rutas `/api` (evita respuestas raras si el SW intercepta). */
-          navigateFallbackDenylist: [/^\/api/, /^\/health/],
+          navigateFallbackDenylist: [/^\/api/, /^\/health/, /^\/socket\.io/],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/api\.open-meteo\.com\/.*/i,

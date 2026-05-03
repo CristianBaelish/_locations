@@ -43,6 +43,11 @@ if (!dests.some((d) => d.includes("/api/"))) {
   process.exit(1);
 }
 
+if (!dests.some((d) => d.includes("/socket.io/"))) {
+  console.error("vercel.json: no hay rewrite de /socket.io hacia el backend (WebSocket + polling).");
+  process.exit(1);
+}
+
 console.log("Config: vercel.json y config/deploy-urls.json coinciden en el origen de Render.");
 
 if (!withProbe) {
@@ -74,7 +79,7 @@ async function checkHealth(label, url, timeoutMs) {
   }
 }
 
-/** Debe cubrir cold start de Render (el cliente usa hasta 2×240s en /health). */
+/** Debe cubrir cold start de Render (GET /health vía Vercel puede tardar mucho en frío). */
 const timeoutMs = 500_000;
 let ok = true;
 ok = (await checkHealth("Render directo", `${renderOrigin}/health`, timeoutMs)) && ok;

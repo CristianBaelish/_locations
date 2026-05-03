@@ -1,12 +1,13 @@
 /**
- * Backend (Node en Render, etc.)
+ * Backend (Node en Render), visto desde el navegador:
  *
- * - En **desarrollo** (`vite`): sin `VITE_API_ORIGIN`, rutas relativas `/api` y `/health` → proxy de Vite al puerto local.
- * - En **producción** (build): sin overrides, el cliente llama directo a `VITE_DEFAULT_RENDER_BACKEND` (Render).
- *   Así evitamos el proxy de Vercel (`vercel.json` rewrites): tiene tope ~2 min hacia orígenes externos y el
- *   cold start de Render gratis puede superarlo, dejando el wake sin cabeceras HTTP.
- * - Con `VITE_API_ORIGIN`: REST, `/health` y (vía `socketServerOrigin`) Socket.io usan esa base.
- * - `vercel.json` sigue siendo útil para previews o si alguien fuerza rutas relativas en otro despliegue.
+ * - Sin `VITE_API_ORIGIN`: **mismo origen** que la página (`""` en el navegador) → `/api`, `/health`, Socket.io
+ *   pasan por el proxy de **Vite** (dev) o **Vercel** (`vercel.json` → Render). Así el cliente no tiene que
+ *   resolver `*.onrender.com` (en algunas redes / datos móviles el DNS falla y “carga para siempre”).
+ * - `VITE_DEFAULT_RENDER_BACKEND` / fallback: solo para SSR sin `window`, tests, o enlaces absolutos de respaldo.
+ * - Con `VITE_API_ORIGIN`: todo va a esa URL explícita.
+ *
+ * Nota: el proxy de Vercel hacia Render tiene tope ~2 min; el cold start gratis puede superarlo (reintentá).
  */
 function defaultRenderBackend(): string {
   const v = import.meta.env.VITE_DEFAULT_RENDER_BACKEND;
@@ -26,37 +27,35 @@ export function explicitBackendOrigin(): string | undefined {
 }
 
 /**
- * Base para `fetch` / XHR al API REST.
- * En prod sin override → mismo host que Socket.io (`defaultRenderBackend`), no el origen de la página.
+ * Base para `fetch` / XHR al API REST (vacío = mismo origen: Vite o Vercel resuelven Render).
  */
 export function apiBase(): string {
   const explicit = explicitBackendOrigin();
   if (explicit) return explicit;
+  if (typeof window !== "undefined") return "";
   if (import.meta.env.PROD) return defaultRenderBackend();
   return "";
 }
 
 /**
- * Origen para Socket.io (siempre absoluto salvo dev + proxy de Vite).
+ * Origen para Socket.io: mismo host que la app en prod (Vercel proxy → Render); `undefined` en dev local.
  */
 export function socketServerOrigin(): string | undefined {
   const explicit = explicitBackendOrigin();
   if (explicit) return explicit;
   if (import.meta.env.DEV) return undefined;
   if (typeof window !== "undefined") {
-    const h = window.location.hostname;
-    if (h === "localhost" || h === "127.0.0.1") return undefined;
+    return window.location.origin;
   }
   return defaultRenderBackend();
 }
 
-/** URL absoluta de GET `/health` (wake de Render, enlace de diagnóstico). */
+/** URL de GET `/health` (mismo origen que la app si hay `window`, para no depender del DNS a onrender.com). */
 export function healthCheckUrl(): string {
   const o = explicitBackendOrigin();
   if (o) return `${o}/health`;
-  if (import.meta.env.PROD) return `${defaultRenderBackend()}/health`;
   if (typeof window !== "undefined") return `${window.location.origin}/health`;
-  return "/health";
+  return `${defaultRenderBackend()}/health`;
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
