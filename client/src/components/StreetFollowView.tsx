@@ -102,6 +102,17 @@ export function StreetFollowView({
   useEffect(() => {
     let cancelled = false;
 
+    /** Google llama esto si la clave es inválida, el referrer no está permitido o falta facturación. */
+    const prevGmAuthFailure = window.gm_authFailure;
+    window.gm_authFailure = () => {
+      if (!cancelled) {
+        setMapsError(
+          "Google Maps rechazó la clave (restricciones del sitio, facturación o API no habilitada). En Google Cloud → Credenciales → tu clave → «Restricciones de aplicación» permití HTTPS de tu dominio (p. ej. https://locationspov.vercel.app/* y http://localhost:*). Revisá también Facturación del proyecto."
+        );
+      }
+      if (typeof prevGmAuthFailure === "function") prevGmAuthFailure();
+    };
+
     loadGoogleMaps()
       .then((g) => {
         if (cancelled || !mapEl.current || !panoEl.current) return;
@@ -146,6 +157,7 @@ export function StreetFollowView({
 
     return () => {
       cancelled = true;
+      window.gm_authFailure = prevGmAuthFailure;
     };
   }, []);
 
@@ -275,8 +287,13 @@ export function StreetFollowView({
           {mapsError}
         </p>
         <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
-          Añade <code>VITE_GOOGLE_MAPS_API_KEY=…</code> en <code>.env</code> (raíz del repo o{" "}
-          <code>client/.env</code>), reinicia Vite y activa Maps JavaScript en Google Cloud.
+          Si ves el cartel gris <em>Something went wrong</em> pero no este mensaje: abrí la consola (F12) y buscá
+          errores de <code>RefererNotAllowedMapError</code> o similar. Suele faltar en la clave la URL exacta de
+          producción en restricciones HTTP, o la cuenta de facturación en Google Cloud.
+        </p>
+        <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+          En local: <code>VITE_GOOGLE_MAPS_API_KEY</code> en <code>.env</code> o <code>client/.env</code> y reiniciá
+          Vite. En Vercel/Render: la misma variable en el panel y <strong>volver a desplegar</strong> el front.
         </p>
       </div>
     );

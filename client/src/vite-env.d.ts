@@ -12,3 +12,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Callback opcional de la API de Maps JS ante error de autenticación / referrer. */
+interface Window {
+  gm_authFailure?: () => void;
+}
