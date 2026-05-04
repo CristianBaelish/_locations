@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { socketServerOrigin } from "../lib/apiBase";
 
+/** Render gratis / redes lentas: el handshake puede tardar >45s; si no, el otro dispositivo ve timeout al conectar. */
+const SOCKET_CONNECT_TIMEOUT_MS = 180_000;
+
 export function useSocket(): {
   socket: Socket | null;
   connectionError: string | null;
@@ -15,10 +18,10 @@ export function useSocket(): {
       path: "/socket.io",
       /** Polling primero: más fiable si el WebSocket cae (proxies, redes móviles, “websocket error”). */
       transports: ["polling", "websocket"],
-      timeout: 45_000,
-      reconnectionAttempts: 12,
-      reconnectionDelay: 1_000,
-      reconnectionDelayMax: 10_000,
+      timeout: SOCKET_CONNECT_TIMEOUT_MS,
+      reconnectionAttempts: 24,
+      reconnectionDelay: 2_000,
+      reconnectionDelayMax: 15_000,
     });
     setSocket(s);
 

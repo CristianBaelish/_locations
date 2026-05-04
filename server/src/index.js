@@ -62,6 +62,9 @@ const io = new Server(server, {
     origin: originAllowed,
     methods: ["GET", "POST"],
   },
+  /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
+  pingTimeout: 120_000,
+  pingInterval: 25_000,
 });
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
