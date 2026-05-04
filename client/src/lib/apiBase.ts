@@ -1,9 +1,9 @@
 /**
  * Backend (Node en Render), visto desde el navegador:
  *
- * - Sin `VITE_API_ORIGIN`: **mismo origen** que la página (`""` en el navegador) → `/api`, `/health`, Socket.io
- *   pasan por el proxy de **Vite** (dev) o **Vercel** (`vercel.json` → Render). Así el cliente no tiene que
- *   resolver `*.onrender.com` (en algunas redes / datos móviles el DNS falla y “carga para siempre”).
+ * - Sin `VITE_API_ORIGIN`: REST y `/health` van por **mismo origen** (Vite/Vercel → Render). **Socket.io va
+ *   directo a Render** (`VITE_DEFAULT_RENDER_BACKEND`): el proxy WebSocket de Vercel → origen externo suele
+ *   fallar (“websocket error”) y el visor no recibe `location-update`.
  * - `VITE_DEFAULT_RENDER_BACKEND` / fallback: solo para SSR sin `window`, tests, o enlaces absolutos de respaldo.
  * - Con `VITE_API_ORIGIN`: todo va a esa URL explícita.
  *
@@ -38,14 +38,17 @@ export function apiBase(): string {
 }
 
 /**
- * Origen para Socket.io: mismo host que la app en prod (Vercel proxy → Render); `undefined` en dev local.
+ * Origen para Socket.io: en prod pública (p. ej. Vercel), **Render directo**; en dev / preview local, mismo
+ * origen (`undefined`) para el proxy de Vite.
  */
 export function socketServerOrigin(): string | undefined {
   const explicit = explicitBackendOrigin();
   if (explicit) return explicit;
   if (import.meta.env.DEV) return undefined;
   if (typeof window !== "undefined") {
-    return window.location.origin;
+    const h = window.location.hostname;
+    if (h === "localhost" || h === "127.0.0.1") return undefined;
+    if (/^192\.168\.\d+\.\d+$/.test(h)) return undefined;
   }
   return defaultRenderBackend();
 }

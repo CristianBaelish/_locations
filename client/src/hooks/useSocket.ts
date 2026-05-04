@@ -13,7 +13,8 @@ export function useSocket(): {
     const origin = socketServerOrigin();
     const s = io(origin, {
       path: "/socket.io",
-      transports: ["websocket", "polling"],
+      /** Polling primero: más fiable si el WebSocket cae (proxies, redes móviles, “websocket error”). */
+      transports: ["polling", "websocket"],
       timeout: 45_000,
       reconnectionAttempts: 12,
       reconnectionDelay: 1_000,
@@ -24,7 +25,7 @@ export function useSocket(): {
     const onErr = (err: Error) => {
       setConnectionError(
         err.message ||
-          "No se pudo conectar al servidor de sincronización (Socket.io). Revisá VITE_API_ORIGIN en Vercel y que el API en Render esté despierto."
+          "No se pudo conectar al servidor de sincronización (Socket.io hacia Render). Revisá que el servicio en Render esté activo, DNS/firewall, y que `config/deploy-urls.json` coincida con la URL del backend."
       );
     };
     const onConnect = () => setConnectionError(null);
