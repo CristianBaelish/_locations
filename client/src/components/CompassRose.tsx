@@ -67,8 +67,10 @@ export function CompassRose({ bearingDeg, caption, compact }: Props) {
             background: "linear-gradient(180deg, #3d8bfd, #1e4a8a)",
             borderRadius: 2,
             transformOrigin: "50% 100%",
+            /** Sin dato no rotamos a 0° (eso parece “mirando al norte”); ocultamos la aguja. */
             transform: deg != null ? `rotate(${deg}deg)` : "rotate(0deg)",
-            opacity: deg != null ? 1 : 0.25,
+            opacity: deg != null ? 1 : 0,
+            visibility: deg != null ? "visible" : "hidden",
             transition: "transform 0.35s ease-out, opacity 0.2s",
           }}
         />

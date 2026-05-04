@@ -81,8 +81,8 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("location-update", {
       lat,
       lng,
-      heading: typeof heading === "number" ? heading : undefined,
-      courseDeg: typeof courseDeg === "number" ? courseDeg : undefined,
+      heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
+      courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
       accuracy: typeof accuracy === "number" ? accuracy : undefined,
       t: Date.now(),
     });

@@ -9,8 +9,8 @@ import { CompassRose } from "../components/CompassRose";
 type UpdatePayload = {
   lat: number;
   lng: number;
-  heading?: number;
-  courseDeg?: number;
+  heading?: number | null;
+  courseDeg?: number | null;
   t?: number;
 };
 
@@ -30,11 +30,11 @@ export function View() {
     const onUpdate = (p: UpdatePayload) => {
       setWaiting(false);
       setPos({ lat: p.lat, lng: p.lng });
-      if (p.heading != null && Number.isFinite(p.heading)) {
-        setHeading(p.heading);
+      if ("heading" in p) {
+        setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
       }
-      if (p.courseDeg != null && Number.isFinite(p.courseDeg)) {
-        setCourseDeg(p.courseDeg);
+      if ("courseDeg" in p) {
+        setCourseDeg(p.courseDeg != null && Number.isFinite(p.courseDeg) ? p.courseDeg : null);
       }
     };
 

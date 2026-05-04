@@ -72,7 +72,8 @@ export function Share() {
           lastUi = now;
           setPos({ lat, lng });
         }
-        if (h != null && Number.isFinite(h)) setHeading(h);
+        /** Si el GPS deja de mandar `heading` (muy habitual quieto o en PC), no dejamos un valor viejo. */
+        setHeading(h != null && Number.isFinite(h) ? h : null);
 
         const prev = lastEmit.current;
         const moved =
@@ -98,8 +99,11 @@ export function Share() {
               roomId,
               lat,
               lng,
-              heading: h != null && Number.isFinite(h) ? h : undefined,
-              courseDeg: lastCourseDeg.current ?? undefined,
+              heading: h != null && Number.isFinite(h) ? h : null,
+              courseDeg:
+                lastCourseDeg.current != null && Number.isFinite(lastCourseDeg.current)
+                  ? lastCourseDeg.current
+                  : null,
               accuracy: p.coords.accuracy ?? undefined,
             });
           }
