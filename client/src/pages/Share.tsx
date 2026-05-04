@@ -33,6 +33,14 @@ export function Share() {
   });
   const lastEmitCoords = useRef<{ lat: number; lng: number } | null>(null);
   const lastCourseDeg = useRef<number | null>(null);
+  /** Última ubicación lista para enviar (si el socket conecta tarde, reemitimos al reconectar). */
+  const lastGeoPayload = useRef<{
+    lat: number;
+    lng: number;
+    heading: number | null;
+    courseDeg: number | null;
+    accuracy?: number;
+  } | null>(null);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
@@ -44,6 +52,28 @@ export function Share() {
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
+
+  useEffect(() => {
+    if (!socket || !roomId) return;
+    const flushPendingLocation = () => {
+      const s = socketRef.current;
+      const payload = lastGeoPayload.current;
+      if (!s?.connected || !payload) return;
+      s.emit("location", {
+        roomId,
+        lat: payload.lat,
+        lng: payload.lng,
+        heading: payload.heading,
+        courseDeg: payload.courseDeg,
+        accuracy: payload.accuracy,
+      });
+    };
+    socket.on("connect", flushPendingLocation);
+    flushPendingLocation();
+    return () => {
+      socket.off("connect", flushPendingLocation);
+    };
+  }, [socket, roomId]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -93,18 +123,22 @@ export function Share() {
           lastEmit.current = { t: now, lat, lng };
           lastEmitCoords.current = { lat, lng };
 
+          lastGeoPayload.current = {
+            lat,
+            lng,
+            heading: h != null && Number.isFinite(h) ? h : null,
+            courseDeg:
+              lastCourseDeg.current != null && Number.isFinite(lastCourseDeg.current)
+                ? lastCourseDeg.current
+                : null,
+            accuracy: p.coords.accuracy ?? undefined,
+          };
+
           const s = socketRef.current;
           if (s?.connected) {
             s.emit("location", {
               roomId,
-              lat,
-              lng,
-              heading: h != null && Number.isFinite(h) ? h : null,
-              courseDeg:
-                lastCourseDeg.current != null && Number.isFinite(lastCourseDeg.current)
-                  ? lastCourseDeg.current
-                  : null,
-              accuracy: p.coords.accuracy ?? undefined,
+              ...lastGeoPayload.current,
             });
           }
         }
