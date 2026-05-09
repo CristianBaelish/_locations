@@ -30,11 +30,13 @@ function originAllowed(origin) {
 }
 
 /** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
+function corsOriginCallback(origin, callback) {
+  callback(null, originAllowed(origin));
+}
+
 app.use(
   cors({
-    origin(origin, callback) {
-      callback(null, originAllowed(origin));
-    },
+    origin: corsOriginCallback,
   })
 );
 app.use(express.json());
@@ -59,7 +61,7 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    origin: corsOriginCallback,
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
