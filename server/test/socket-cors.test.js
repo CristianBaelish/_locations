@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { io as connectClient } from "socket.io-client";
 import { io, server } from "../src/index.js";
 
 function listenOnEphemeralPort() {
@@ -19,36 +18,20 @@ test("Socket.IO polling accepts allowed cross-origin handshakes", async (t) => {
   const port = await listenOnEphemeralPort();
 
   t.after(async () => {
-    io.close();
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
+    await new Promise((resolve) => io.close(resolve));
   });
 
-  const socket = connectClient(`http://127.0.0.1:${port}`, {
-    extraHeaders: {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1_500);
+
+  const response = await fetch(`http://127.0.0.1:${port}/socket.io/?EIO=4&transport=polling&t=test`, {
+    headers: {
       Origin: "https://example.vercel.app",
     },
-    forceNew: true,
-    timeout: 1_000,
-    transports: ["polling"],
+    signal: controller.signal,
   });
+  clearTimeout(timer);
 
-  t.after(() => {
-    socket.close();
-  });
-
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Socket.IO polling handshake timed out")), 1_500);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    socket.once("connect_error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
-
-  assert.equal(socket.connected, true);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://example.vercel.app");
 });
