@@ -20,7 +20,7 @@ const extraOrigins = (process.env.FRONTEND_URL || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-function originAllowed(origin) {
+export function originAllowed(origin) {
   if (!origin) return true;
   if (extraOrigins.includes(origin)) return true;
   if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) return true;
@@ -29,12 +29,14 @@ function originAllowed(origin) {
   return false;
 }
 
+export function corsOrigin(origin, callback) {
+  callback(null, originAllowed(origin));
+}
+
 /** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
 app.use(
   cors({
-    origin(origin, callback) {
-      callback(null, originAllowed(origin));
-    },
+    origin: corsOrigin,
   })
 );
 app.use(express.json());
@@ -59,7 +61,7 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    origin: corsOrigin,
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
@@ -105,6 +107,10 @@ if (existsSync(clientDist)) {
   });
 }
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
+  });
+}
+
+export { app, server, io };
