@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import express from "express";
 import http from "http";
 import cors from "cors";
@@ -30,11 +30,13 @@ function originAllowed(origin) {
 }
 
 /** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
+function corsOrigin(origin, callback) {
+  callback(null, originAllowed(origin));
+}
+
 app.use(
   cors({
-    origin(origin, callback) {
-      callback(null, originAllowed(origin));
-    },
+    origin: corsOrigin,
   })
 );
 app.use(express.json());
@@ -57,11 +59,12 @@ app.get("/api/rooms/:id", (req, res) => {
 });
 
 const server = http.createServer(app);
+const socketCors = {
+  origin: corsOrigin,
+  methods: ["GET", "POST"],
+};
 const io = new Server(server, {
-  cors: {
-    origin: originAllowed,
-    methods: ["GET", "POST"],
-  },
+  cors: socketCors,
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
   pingTimeout: 120_000,
   pingInterval: 25_000,
@@ -105,6 +108,10 @@ if (existsSync(clientDist)) {
   });
 }
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
+  });
+}
+
+export { app, corsOrigin, io, originAllowed, server, socketCors };
