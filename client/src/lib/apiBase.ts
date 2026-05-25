@@ -1,10 +1,12 @@
 /**
  * Backend (Node en Render), visto desde el navegador:
  *
- * - Sin `VITE_API_ORIGIN`: REST y `/health` van por **mismo origen** (Vite/Vercel → Render). **Socket.io va
- *   directo a Render** (`VITE_DEFAULT_RENDER_BACKEND`): el proxy WebSocket de Vercel → origen externo suele
- *   fallar (“websocket error”) y el visor no recibe `location-update`.
- * - `VITE_DEFAULT_RENDER_BACKEND` / fallback: solo para SSR sin `window`, tests, o enlaces absolutos de respaldo.
+ * - Sin `VITE_API_ORIGIN`: REST y `/health` van por **mismo origen** (Vite/Vercel → Render).
+ * - En builds de **Vercel**, Socket.io va directo a Render (`VITE_DEFAULT_RENDER_BACKEND`): el proxy WebSocket de
+ *   Vercel → origen externo suele fallar (“websocket error”) y el visor no recibe `location-update`.
+ * - En builds no-Vercel (Render todo-en-uno), Socket.io usa el mismo origen para no enviar ubicaciones al backend
+ *   fallback embebido.
+ * - `VITE_DEFAULT_RENDER_BACKEND` / fallback: para Vercel, SSR sin `window`, tests, o enlaces absolutos de respaldo.
  * - Con `VITE_API_ORIGIN`: todo va a esa URL explícita.
  *
  * Nota: el proxy de Vercel hacia Render tiene tope ~2 min; el cold start gratis puede superarlo (reintentá).
@@ -38,18 +40,14 @@ export function apiBase(): string {
 }
 
 /**
- * Origen para Socket.io: en prod pública (p. ej. Vercel), **Render directo**; en dev / preview local, mismo
- * origen (`undefined`) para el proxy de Vite.
+ * Origen para Socket.io: Vercel necesita **Render directo**; Render todo-en-uno y preview local deben usar el mismo
+ * origen (`undefined`) para que REST, SPA y sync vivan en el mismo proceso.
  */
 export function socketServerOrigin(): string | undefined {
   const explicit = explicitBackendOrigin();
   if (explicit) return explicit;
   if (import.meta.env.DEV) return undefined;
-  if (typeof window !== "undefined") {
-    const h = window.location.hostname;
-    if (h === "localhost" || h === "127.0.0.1") return undefined;
-    if (/^192\.168\.\d+\.\d+$/.test(h)) return undefined;
-  }
+  if (typeof window !== "undefined" && import.meta.env.VITE_BUILT_ON_VERCEL !== "1") return undefined;
   return defaultRenderBackend();
 }
 
