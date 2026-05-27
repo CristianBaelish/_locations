@@ -226,7 +226,8 @@ export function Home() {
       <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem" }}>
         <strong>Si un enlace directo a <code>*.onrender.com</code> “carga para siempre”:</strong> puede ser el
         DNS del operador (p. ej. sufijo <code>.com.ar</code>). La app usa <strong>tu dominio en Vercel</strong>{" "}
-        para API, <code>/health</code> y Socket.io; probá el botón de arriba o cambiá DNS a{" "}
+        para API y <code>/health</code>; Socket.io puede ir directo a Render si el proxy WebSocket falla. Probá el
+        botón de arriba o cambiá DNS a{" "}
         <strong>1.1.1.1</strong> / <strong>8.8.8.8</strong> si algo sigue fallando.
       </p>
 
