@@ -84,7 +84,7 @@ test("replays the latest room location to viewers that join after it was sent", 
 
   const options = {
     path: "/socket.io",
-    transports: ["websocket"],
+    transports: ["polling", "websocket"],
     reconnection: false,
     timeout: 2_000,
   };
