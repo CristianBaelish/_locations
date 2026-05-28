@@ -45,6 +45,8 @@ app.get("/health", (_req, res) => {
 
 /** @type {Set<string>} */
 const rooms = new Set();
+/** @type {Map<string, { lat: number; lng: number; heading: number | null; courseDeg: number | null; accuracy?: number; t: number }>} */
+const lastLocationByRoom = new Map();
 
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
@@ -74,21 +76,28 @@ io.on("connection", (socket) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
     rooms.add(roomId);
     socket.join(roomId);
+    const lastLocation = lastLocationByRoom.get(roomId);
+    if (lastLocation) {
+      socket.emit("location-update", lastLocation);
+    }
   });
 
   socket.on("location", (payload) => {
     const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
     if (typeof lat !== "number" || typeof lng !== "number") return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     rooms.add(roomId);
-    socket.to(roomId).emit("location-update", {
+    const update = {
       lat,
       lng,
       heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
       courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
-      accuracy: typeof accuracy === "number" ? accuracy : undefined,
+      accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : undefined,
       t: Date.now(),
-    });
+    };
+    lastLocationByRoom.set(roomId, update);
+    socket.to(roomId).emit("location-update", update);
   });
 });
 
