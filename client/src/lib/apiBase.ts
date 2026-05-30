@@ -1,9 +1,10 @@
 /**
  * Backend (Node en Render), visto desde el navegador:
  *
- * - Sin `VITE_API_ORIGIN`: REST y `/health` van por **mismo origen** (Vite/Vercel → Render). **Socket.io va
- *   directo a Render** (`VITE_DEFAULT_RENDER_BACKEND`): el proxy WebSocket de Vercel → origen externo suele
- *   fallar (“websocket error”) y el visor no recibe `location-update`.
+ * - Sin `VITE_API_ORIGIN`: REST y `/health` van por **mismo origen** (Vite/Vercel → Render). En builds de
+ *   Vercel, **Socket.io va directo a Render** (`VITE_DEFAULT_RENDER_BACKEND`): el proxy WebSocket de Vercel →
+ *   origen externo suele fallar (“websocket error”) y el visor no recibe `location-update`. En builds servidos
+ *   por Render, Socket.io queda en mismo origen para que REST y sockets usen la misma instancia.
  * - `VITE_DEFAULT_RENDER_BACKEND` / fallback: solo para SSR sin `window`, tests, o enlaces absolutos de respaldo.
  * - Con `VITE_API_ORIGIN`: todo va a esa URL explícita.
  *
@@ -15,6 +16,10 @@ function defaultRenderBackend(): string {
     return v.trim().replace(/\/$/, "");
   }
   return "https://locationsbaelish.onrender.com";
+}
+
+function builtOnVercel(): boolean {
+  return import.meta.env.VITE_BUILT_ON_VERCEL === "1";
 }
 
 /** Override explícito de la URL del API (si no, en prod se usa `defaultRenderBackend`). */
@@ -38,8 +43,8 @@ export function apiBase(): string {
 }
 
 /**
- * Origen para Socket.io: en prod pública (p. ej. Vercel), **Render directo**; en dev / preview local, mismo
- * origen (`undefined`) para el proxy de Vite.
+ * Origen para Socket.io: en Vercel, **Render directo**; en dev / preview local / Render all-in-one, mismo
+ * origen (`undefined`) para usar el host que sirvió la SPA.
  */
 export function socketServerOrigin(): string | undefined {
   const explicit = explicitBackendOrigin();
@@ -50,7 +55,8 @@ export function socketServerOrigin(): string | undefined {
     if (h === "localhost" || h === "127.0.0.1") return undefined;
     if (/^192\.168\.\d+\.\d+$/.test(h)) return undefined;
   }
-  return defaultRenderBackend();
+  if (builtOnVercel()) return defaultRenderBackend();
+  return undefined;
 }
 
 /** URL de GET `/health` (mismo origen que la app si hay `window`, para no depender del DNS a onrender.com). */
