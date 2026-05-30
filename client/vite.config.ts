@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
   for (const [key, value] of Object.entries(merged)) {
     define[`import.meta.env.${key}`] = JSON.stringify(value);
   }
-  /** Marcador de build en Vercel (p. ej. telemetría futura); el API en prod va directo a Render (ver `apiBase.ts`). */
+  /** Marcador de build en Vercel; `apiBase.ts` lo usa para decidir si Socket.io debe ir directo a Render. */
   define["import.meta.env.VITE_BUILT_ON_VERCEL"] = JSON.stringify(
     process.env.VERCEL === "1" ? "1" : "0"
   );

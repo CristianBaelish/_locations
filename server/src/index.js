@@ -6,35 +6,16 @@ import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
+import { corsOrigin } from "./corsOrigin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
 const app = express();
 
-/**
- * Orígenes: local + FRONTEND_URL + cualquier https (Vercel con dominio propio, previews, etc.)
- * En Render opcional: FRONTEND_URL=https://tu-app.vercel.app
- */
-const extraOrigins = (process.env.FRONTEND_URL || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-function originAllowed(origin) {
-  if (!origin) return true;
-  if (extraOrigins.includes(origin)) return true;
-  if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) return true;
-  if (/^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin)) return true;
-  if (origin.startsWith("https://")) return true;
-  return false;
-}
-
 /** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
 app.use(
   cors({
-    origin(origin, callback) {
-      callback(null, originAllowed(origin));
-    },
+    origin: corsOrigin,
   })
 );
 app.use(express.json());
@@ -59,7 +40,7 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    origin: corsOrigin,
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
