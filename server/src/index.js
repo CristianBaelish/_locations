@@ -59,7 +59,10 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    /** Engine.IO usa el mismo contrato de `cors`: origin callback obligatorio para no colgar el handshake. */
+    origin(origin, callback) {
+      callback(null, originAllowed(origin));
+    },
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
