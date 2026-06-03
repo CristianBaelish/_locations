@@ -22,6 +22,13 @@ export function View() {
   const [courseDeg, setCourseDeg] = useState<number | null>(null);
   const [waiting, setWaiting] = useState(true);
 
+  useEffect(() => {
+    setPos(null);
+    setHeading(null);
+    setCourseDeg(null);
+    setWaiting(true);
+  }, [roomId]);
+
   useJoinRoom(socket, roomId);
 
   useEffect(() => {

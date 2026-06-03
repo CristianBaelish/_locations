@@ -18,5 +18,9 @@ jobs:
       - run: npm ci
       - name: Coherencia deploy (vercel.json vs config)
         run: npm run verify:deploy
+      - name: Tests cliente
+        run: npm run test -w client
+      - name: Tests servidor
+        run: npm run test -w server
       - name: Build cliente
         run: npm run build -w client

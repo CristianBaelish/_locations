@@ -29,6 +29,10 @@ function originAllowed(origin) {
   return false;
 }
 
+function corsOriginCallback(origin, callback) {
+  callback(null, originAllowed(origin));
+}
+
 /** `cors` invoca `origin` como (origin, callback) — hay que llamar a `callback`, si no la petición queda colgada. */
 app.use(
   cors({
@@ -59,7 +63,7 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    origin: corsOriginCallback,
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
@@ -70,10 +74,22 @@ const io = new Server(server, {
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
 io.on("connection", (socket) => {
-  socket.on("join", ({ roomId }) => {
+  socket.on("join", (payload) => {
+    const { roomId } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    for (const joinedRoom of socket.rooms) {
+      if (joinedRoom !== socket.id) {
+        socket.leave(joinedRoom);
+      }
+    }
     rooms.add(roomId);
     socket.join(roomId);
+  });
+
+  socket.on("leave", (payload) => {
+    const { roomId } = payload ?? {};
+    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    socket.leave(roomId);
   });
 
   socket.on("location", (payload) => {
