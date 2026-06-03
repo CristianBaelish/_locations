@@ -48,6 +48,16 @@ export function Share() {
       ? `${window.location.origin}${base}/v/${roomId}`
       : "";
 
+  useEffect(() => {
+    setPos(null);
+    setHeading(null);
+    setMovementBearing(null);
+    lastEmit.current = { t: 0, lat: NaN, lng: NaN };
+    lastEmitCoords.current = null;
+    lastCourseDeg.current = null;
+    lastGeoPayload.current = null;
+  }, [roomId]);
+
   useJoinRoom(socket, roomId);
 
   const socketRef = useRef(socket);
