@@ -63,7 +63,7 @@ async function waitForHealth(baseUrl, child, stderr) {
 function connectSocket(baseUrl) {
   const socket = io(baseUrl, {
     path: "/socket.io",
-    transports: ["websocket"],
+    transports: ["polling", "websocket"],
     timeout: 5_000,
     reconnection: false,
     forceNew: true,
