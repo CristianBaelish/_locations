@@ -10,6 +10,7 @@ import {
 } from "../lib/apiBase";
 import { xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
+import { rememberShareToken } from "../lib/shareToken";
 
 function isAbortError(e: unknown): boolean {
   return (
@@ -94,14 +95,15 @@ export function Home() {
           `No se pudo crear la sesión (${res.status}). ${snippet ? `Respuesta: ${snippet}` : "Revisá que el servicio en Render esté en marcha y que config/deploy-urls.json (o VITE_DEFAULT_RENDER_BACKEND en Vercel) coincida con la URL del panel; o definí VITE_API_ORIGIN con https://… sin barra final." }`
         );
       }
-      let data: { roomId?: string };
+      let data: { roomId?: string; shareToken?: string };
       try {
-        data = JSON.parse(res.text) as { roomId?: string };
+        data = JSON.parse(res.text) as { roomId?: string; shareToken?: string };
       } catch {
         throw new Error("Respuesta inválida del servidor (no es JSON).");
       }
-      if (!data.roomId) throw new Error("Respuesta inválida del servidor");
-      navigate(`/s/${data.roomId}`);
+      if (!data.roomId || !data.shareToken) throw new Error("Respuesta inválida del servidor");
+      rememberShareToken(data.roomId, data.shareToken);
+      navigate(`/s/${data.roomId}`, { state: { shareToken: data.shareToken } });
     } catch (e) {
       const noConn = `No hay conexión con el API (${url}). Probá ${healthCheckUrl()} en otra pestaña (debe verse la palabra ok).`;
       let msg: string;

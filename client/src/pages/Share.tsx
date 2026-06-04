@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
@@ -10,14 +10,20 @@ import {
   messageInsecureGeolocationContext,
 } from "../lib/geoErrors";
 import { useJoinRoom } from "../hooks/useJoinRoom";
+import { readShareToken, rememberShareToken } from "../lib/shareToken";
 
 const MIN_INTERVAL_MS = 3500;
 const MIN_MOVE_M = 12;
 /** Mínimo desplazamiento entre emisiones para actualizar el rumbo por trayectoria */
 const MIN_COURSE_M = 12;
 
+type ShareRouteState = {
+  shareToken?: unknown;
+};
+
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
+  const location = useLocation();
   const { socket, connectionError } = useSocket();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
@@ -47,6 +53,10 @@ export function Share() {
     typeof window !== "undefined" && roomId
       ? `${window.location.origin}${base}/v/${roomId}`
       : "";
+  const routeState = location.state as ShareRouteState | null;
+  const shareTokenFromState =
+    typeof routeState?.shareToken === "string" ? routeState.shareToken : null;
+  const shareToken = shareTokenFromState ?? (roomId ? readShareToken(roomId) : null);
 
   useJoinRoom(socket, roomId);
 
@@ -54,13 +64,20 @@ export function Share() {
   socketRef.current = socket;
 
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (roomId && shareTokenFromState) {
+      rememberShareToken(roomId, shareTokenFromState);
+    }
+  }, [roomId, shareTokenFromState]);
+
+  useEffect(() => {
+    if (!socket || !roomId || !shareToken) return;
     const flushPendingLocation = () => {
       const s = socketRef.current;
       const payload = lastGeoPayload.current;
       if (!s?.connected || !payload) return;
       s.emit("location", {
         roomId,
+        shareToken,
         lat: payload.lat,
         lng: payload.lng,
         heading: payload.heading,
@@ -73,7 +90,7 @@ export function Share() {
     return () => {
       socket.off("connect", flushPendingLocation);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, shareToken]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -135,9 +152,10 @@ export function Share() {
           };
 
           const s = socketRef.current;
-          if (s?.connected) {
+          if (s?.connected && shareToken) {
             s.emit("location", {
               roomId,
+              shareToken,
               ...lastGeoPayload.current,
             });
           }
@@ -151,7 +169,7 @@ export function Share() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;
@@ -180,6 +198,13 @@ export function Share() {
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
+        </p>
+      ) : null}
+
+      {!shareToken ? (
+        <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
+          No se puede publicar en esta sesión desde este navegador. Volvé al inicio y creá un enlace nuevo para
+          compartir ubicación.
         </p>
       ) : null}
 

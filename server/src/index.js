@@ -43,13 +43,14 @@ app.get("/health", (_req, res) => {
   res.type("text").send("ok");
 });
 
-/** @type {Set<string>} */
-const rooms = new Set();
+/** @type {Map<string, { shareToken: string }>} */
+const rooms = new Map();
 
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
-  rooms.add(roomId);
-  res.json({ roomId });
+  const shareToken = nanoid(32);
+  rooms.set(roomId, { shareToken });
+  res.json({ roomId, shareToken });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
@@ -70,17 +71,19 @@ const io = new Server(server, {
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
 io.on("connection", (socket) => {
-  socket.on("join", ({ roomId }) => {
+  socket.on("join", (payload) => {
+    const { roomId } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    rooms.add(roomId);
     socket.join(roomId);
   });
 
   socket.on("location", (payload) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+    const { roomId, shareToken, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
-    rooms.add(roomId);
+    const room = rooms.get(roomId);
+    if (!room || typeof shareToken !== "string" || shareToken !== room.shareToken) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
     socket.to(roomId).emit("location-update", {
       lat,
       lng,
