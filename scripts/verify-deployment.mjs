@@ -43,7 +43,7 @@ if (!dests.some((d) => d.includes("/api/"))) {
   process.exit(1);
 }
 
-if (!dests.some((d) => d.includes("/socket.io/"))) {
+if (!dests.some((d) => d.includes("/socket.io"))) {
   console.error("vercel.json: no hay rewrite de /socket.io hacia el backend (WebSocket + polling).");
   process.exit(1);
 }
@@ -90,4 +90,33 @@ if (!ok) {
   process.exit(1);
 }
 
-console.log("\nProbes HTTP: ambos /health respondieron ok.");
+async function checkSocketIo(label, base, timeoutMs) {
+  const url = `${base.replace(/\/$/, "")}/socket.io/?EIO=4&transport=polling`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    const text = (await res.text()).trim();
+    if (!res.ok || text.startsWith("<!") || !text.startsWith("0")) {
+      console.error(`${label}: handshake Socket.io inválido (HTTP ${res.status}) — ${text.slice(0, 120)}`);
+      return false;
+    }
+    console.log(`${label}: handshake Socket.io ok`);
+    return true;
+  } catch (e) {
+    console.error(`${label} Socket.io: ${e instanceof Error ? e.message : e}`);
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+ok = (await checkSocketIo("Render directo", renderOrigin, 30_000)) && ok;
+ok = (await checkSocketIo("Vercel (rewrite)", publicOrigin, 30_000)) && ok;
+
+if (!ok) {
+  console.error("\nSocket.io no responde bien. Revisá CORS del servidor y rewrites de vercel.json.");
+  process.exit(1);
+}
+
+console.log("\nProbes HTTP: /health y handshake Socket.io respondieron ok.");

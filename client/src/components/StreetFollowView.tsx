@@ -95,9 +95,10 @@ export function StreetFollowView({
   const stablePosition = useMemo((): LatLng | null => {
     if (!position) return null;
     return { lat: position.lat, lng: position.lng };
-  }, [position ? `${position.lat.toFixed(4)}_${position.lng.toFixed(4)}` : ""]);
+  }, [position ? `${position.lat.toFixed(5)}_${position.lng.toFixed(5)}` : ""]);
 
-  const debouncedPos = useDebounced(stablePosition, 900);
+  const panoDebounceMs = positionSource === "remote" ? 350 : 600;
+  const debouncedPos = useDebounced(stablePosition, panoDebounceMs);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,18 +184,26 @@ export function StreetFollowView({
   }, [mapsReady]);
 
   useEffect(() => {
-    if (!mapsReady || !debouncedPos) return;
+    if (!mapsReady || !stablePosition) return;
     const map = mapRef.current;
     const marker = markerRef.current;
-    const pano = panoRef.current;
-    const sv = svRef.current;
-    if (!map || !marker || !pano || !sv) return;
+    if (!map || !marker) return;
 
     const g = google.maps;
-    const latLng = new g.LatLng(debouncedPos.lat, debouncedPos.lng);
+    const latLng = new g.LatLng(stablePosition.lat, stablePosition.lng);
     map.panTo(latLng);
     map.setZoom(17);
     marker.setPosition(latLng);
+  }, [mapsReady, stablePosition]);
+
+  useEffect(() => {
+    if (!mapsReady || !debouncedPos) return;
+    const pano = panoRef.current;
+    const sv = svRef.current;
+    if (!pano || !sv) return;
+
+    const g = google.maps;
+    const latLng = new g.LatLng(debouncedPos.lat, debouncedPos.lng);
 
     const myRequest = ++panoRequestId.current;
     setPanoHint(null);
@@ -311,11 +320,11 @@ export function StreetFollowView({
         <div className="pano-box">
           {!panoHasImage && mapsReady ? (
             <div className="pano-placeholder pano-inner" style={{ position: "absolute", inset: 0, zIndex: 1 }}>
-              {debouncedPos
-                ? "Buscando vista de calle cercana…"
-                : positionSource === "remote"
+              {!position
+                ? positionSource === "remote"
                   ? "Esperando la posición de quien comparte la sesión…"
-                  : "Esperando posición GPS para cargar Street View…"}
+                  : "Esperando posición GPS para cargar Street View…"
+                : "Buscando vista de calle cercana…"}
             </div>
           ) : null}
           <div ref={panoEl} className="pano-inner" />

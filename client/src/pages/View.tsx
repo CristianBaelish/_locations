@@ -5,6 +5,7 @@ import { useJoinRoom } from "../hooks/useJoinRoom";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
+import { SyncStatus } from "../components/SyncStatus";
 
 type UpdatePayload = {
   lat: number;
@@ -16,11 +17,12 @@ type UpdatePayload = {
 
 export function View() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { socket, connectionError } = useSocket();
+  const { socket, connected, connectionError } = useSocket();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [courseDeg, setCourseDeg] = useState<number | null>(null);
   const [waiting, setWaiting] = useState(true);
+  const [lastReceivedAt, setLastReceivedAt] = useState<number | null>(null);
 
   useJoinRoom(socket, roomId);
 
@@ -29,6 +31,7 @@ export function View() {
 
     const onUpdate = (p: UpdatePayload) => {
       setWaiting(false);
+      setLastReceivedAt(Date.now());
       setPos({ lat: p.lat, lng: p.lng });
       if ("heading" in p) {
         setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
@@ -57,26 +60,36 @@ export function View() {
         Sesión: <code>{roomId}</code>
       </p>
 
+      <SyncStatus connected={connected} role="view" lastReceivedAt={lastReceivedAt} />
+
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
         </p>
       ) : null}
 
-      {waiting && !connectionError ? <p className="muted">Esperando la primera ubicación…</p> : null}
+      {waiting && connected && !connectionError ? (
+        <p className="muted">
+          Conectado al servidor. Esperando la primera ubicación de quien comparte (debe tener abierta la página
+          «Compartiendo» con el mismo código <code>{roomId}</code>).
+        </p>
+      ) : null}
+      {waiting && !connected && !connectionError ? (
+        <p className="muted">Conectando al servidor de sincronización…</p>
+      ) : null}
 
       <ViewerContextPanel sharerPos={pos} />
 
       {pos ? (
         <div className="card" style={{ marginBottom: "1rem" }}>
           <CompassRose
-            bearingDeg={courseDeg ?? heading}
+            bearingDeg={heading ?? courseDeg}
             caption={
-              courseDeg != null
-                ? "Rumbo según trayectoria reciente de quien comparte"
-                : heading != null
-                  ? "Orientación del dispositivo de quien comparte"
-                  : "Aún sin rumbo por trayectoria (necesita moverse un poco)"
+              heading != null
+                ? "Brújula del dispositivo de quien comparte"
+                : courseDeg != null
+                  ? "Rumbo según trayectoria reciente de quien comparte"
+                  : "Aún sin rumbo (quien comparte puede activar la brújula o moverse un poco)"
             }
             compact
           />

@@ -46,6 +46,9 @@ app.get("/health", (_req, res) => {
 /** @type {Set<string>} */
 const rooms = new Set();
 
+/** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
+const lastLocationByRoom = new Map();
+
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
   rooms.add(roomId);
@@ -59,7 +62,9 @@ app.get("/api/rooms/:id", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: originAllowed,
+    origin(origin, callback) {
+      callback(null, originAllowed(origin));
+    },
     methods: ["GET", "POST"],
   },
   /** Móviles / pestaña en segundo plano: el default (20s) corta la sesión por “timeout” aunque el socket siga vivo. */
@@ -70,10 +75,19 @@ const io = new Server(server, {
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
 io.on("connection", (socket) => {
-  socket.on("join", ({ roomId }) => {
+  socket.on("join", async ({ roomId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
     rooms.add(roomId);
     socket.join(roomId);
+    const cached = lastLocationByRoom.get(roomId);
+    if (cached) {
+      socket.emit("location-update", cached);
+    }
+    const peers = (await io.in(roomId).fetchSockets()).length;
+    io.to(roomId).emit("room-status", { peers });
+    if (typeof ack === "function") {
+      ack({ ok: true, peers, hasCached: !!cached });
+    }
   });
 
   socket.on("location", (payload) => {
@@ -81,28 +95,28 @@ io.on("connection", (socket) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
     if (typeof lat !== "number" || typeof lng !== "number") return;
     rooms.add(roomId);
-    socket.to(roomId).emit("location-update", {
+    const update = {
       lat,
       lng,
       heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
       courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
       accuracy: typeof accuracy === "number" ? accuracy : undefined,
       t: Date.now(),
-    });
+    };
+    lastLocationByRoom.set(roomId, update);
+    socket.to(roomId).emit("location-update", update);
   });
 });
 
 /** Build del cliente (`npm run build` en la raíz del repo). Mismo host que la API → sin Vercel ni DNS a onrender aparte. */
 const clientDist = path.join(__dirname, "..", "..", "client", "dist");
 if (existsSync(clientDist)) {
+  const spaIndex = path.join(clientDist, "index.html");
   app.use(express.static(clientDist, { index: false }));
-  app.get(/.*/, (req, res, next) => {
-    if (req.method !== "GET") return next();
-    if (req.path.startsWith("/socket.io")) return next();
-    if (req.path.startsWith("/api")) return next();
-    if (req.path === "/health") return next();
-    res.sendFile(path.join(clientDist, "index.html"), (err) => next(err));
-  });
+  /** Solo rutas del SPA; nunca un catch-all que toque `/socket.io` (deja la petición colgada). */
+  const sendSpa = (_req, res) => res.sendFile(spaIndex);
+  app.get("/", sendSpa);
+  app.get(/^\/(s|v)\/[^/]+$/, sendSpa);
 }
 
 server.listen(PORT, "0.0.0.0", () => {

@@ -7,17 +7,19 @@ const SOCKET_CONNECT_TIMEOUT_MS = 180_000;
 
 export function useSocket(): {
   socket: Socket | null;
+  connected: boolean;
   connectionError: string | null;
 } {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
     const origin = socketServerOrigin();
     const s = io(origin, {
       path: "/socket.io",
-      /** Polling primero: más fiable si el WebSocket cae (proxies, redes móviles, “websocket error”). */
-      transports: ["polling", "websocket"],
+      /** Solo polling: evita fallos de WebSocket en proxies (Vercel, móvil). */
+      transports: ["polling"],
       timeout: SOCKET_CONNECT_TIMEOUT_MS,
       reconnectionAttempts: 24,
       reconnectionDelay: 2_000,
@@ -26,22 +28,29 @@ export function useSocket(): {
     setSocket(s);
 
     const onErr = (err: Error) => {
+      setConnected(false);
       setConnectionError(
         err.message ||
-          "No se pudo conectar al servidor de sincronización (Socket.io hacia Render). Revisá que el servicio en Render esté activo, DNS/firewall, y que `config/deploy-urls.json` coincida con la URL del backend."
+          "No se pudo conectar al servidor de sincronización. Revisá que el servicio en Render esté activo."
       );
     };
-    const onConnect = () => setConnectionError(null);
+    const onConnect = () => {
+      setConnected(true);
+      setConnectionError(null);
+    };
+    const onDisconnect = () => setConnected(false);
 
     s.on("connect_error", onErr);
     s.on("connect", onConnect);
+    s.on("disconnect", onDisconnect);
 
     return () => {
       s.off("connect_error", onErr);
       s.off("connect", onConnect);
+      s.off("disconnect", onDisconnect);
       s.close();
     };
   }, []);
 
-  return { socket, connectionError };
+  return { socket, connected, connectionError };
 }

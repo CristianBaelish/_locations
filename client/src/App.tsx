@@ -5,7 +5,7 @@ import { View } from "./pages/View";
 
 /**
  * REST y /health van al mismo origen que la app (p. ej. locationspov.vercel.app) salvo que definas
- * VITE_API_ORIGIN. Socket.io sigue yendo al host en Render vía el cliente.
+ * VITE_API_ORIGIN. Socket.io usa el mismo origen (rewrites de Vercel o proxy de Vite).
  */
 export function App() {
   return (

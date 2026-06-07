@@ -71,7 +71,7 @@ export function CompassRose({ bearingDeg, caption, compact }: Props) {
             transform: deg != null ? `rotate(${deg}deg)` : "rotate(0deg)",
             opacity: deg != null ? 1 : 0,
             visibility: deg != null ? "visible" : "hidden",
-            transition: "transform 0.35s ease-out, opacity 0.2s",
+            transition: "transform 0.15s ease-out, opacity 0.2s",
           }}
         />
         <div
