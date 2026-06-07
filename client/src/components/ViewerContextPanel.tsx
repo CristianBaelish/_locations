@@ -16,9 +16,7 @@ export function ViewerContextPanel({ sharerPos }: Props) {
 
   return (
     <div className="card viewer-context" style={{ marginBottom: "1rem" }}>
-      <h2 style={{ fontSize: "0.95rem", marginTop: 0, marginBottom: "0.85rem" }}>
-        Contexto en su ubicación
-      </h2>
+      <h2 style={{ fontSize: "0.95rem", marginTop: 0, marginBottom: "0.85rem" }}>Contexto</h2>
       <div className="context-tiles">
         <div className="context-tile">
           <span className="context-tile-icon" style={{ color: "var(--muted)" }}>
@@ -72,31 +70,20 @@ export function ViewerContextPanel({ sharerPos }: Props) {
             <DistanceIcon size={24} />
           </span>
           <div className="context-tile-body">
-            <div className="context-tile-label">Distancia hasta vos</div>
+            <div className="context-tile-label">Distancia</div>
             {km != null ? (
               <div className="context-tile-value">
                 {km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(2)} km`}
-                <span className="muted" style={{ fontWeight: 400, fontSize: "0.85em" }}>
-                  {" "}
-                  en línea recta
-                </span>
               </div>
             ) : (
               <div className="context-tile-value muted">{distErr ?? "Calculando…"}</div>
             )}
-            <button
-              type="button"
-              className="secondary context-tile-btn"
-              onClick={refresh}
-            >
-              Actualizar distancia
+            <button type="button" className="secondary context-tile-btn" onClick={refresh}>
+              Actualizar
             </button>
           </div>
         </div>
       </div>
-      <p className="muted" style={{ fontSize: "0.75rem", marginBottom: 0, marginTop: "0.85rem" }}>
-        Clima y hora (aprox.) por Open-Meteo. La distancia pide permiso de ubicación en este teléfono.
-      </p>
     </div>
   );
 }

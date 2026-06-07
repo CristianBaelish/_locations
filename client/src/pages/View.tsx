@@ -5,7 +5,6 @@ import { useJoinRoom } from "../hooks/useJoinRoom";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
-import { SyncStatus } from "../components/SyncStatus";
 
 type UpdatePayload = {
   lat: number;
@@ -17,12 +16,12 @@ type UpdatePayload = {
 
 export function View() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { socket, connected, connectionError } = useSocket();
+  const { socket, connectionError } = useSocket();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [courseDeg, setCourseDeg] = useState<number | null>(null);
   const [waiting, setWaiting] = useState(true);
-  const [lastReceivedAt, setLastReceivedAt] = useState<number | null>(null);
+  const [ended, setEnded] = useState(false);
 
   useJoinRoom(socket, roomId);
 
@@ -30,8 +29,8 @@ export function View() {
     if (!socket || !roomId) return;
 
     const onUpdate = (p: UpdatePayload) => {
+      setEnded(false);
       setWaiting(false);
-      setLastReceivedAt(Date.now());
       setPos({ lat: p.lat, lng: p.lng });
       if ("heading" in p) {
         setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
@@ -41,9 +40,19 @@ export function View() {
       }
     };
 
+    const onEnded = () => {
+      setEnded(true);
+      setWaiting(false);
+      setPos(null);
+      setHeading(null);
+      setCourseDeg(null);
+    };
+
     socket.on("location-update", onUpdate);
+    socket.on("sharing-ended", onEnded);
     return () => {
       socket.off("location-update", onUpdate);
+      socket.off("sharing-ended", onEnded);
     };
   }, [socket, roomId]);
 
@@ -56,11 +65,6 @@ export function View() {
       </div>
 
       <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Siguiendo</h1>
-      <p className="muted">
-        Sesión: <code>{roomId}</code>
-      </p>
-
-      <SyncStatus connected={connected} role="view" lastReceivedAt={lastReceivedAt} />
 
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
@@ -68,31 +72,14 @@ export function View() {
         </p>
       ) : null}
 
-      {waiting && connected && !connectionError ? (
-        <p className="muted">
-          Conectado al servidor. Esperando la primera ubicación de quien comparte (debe tener abierta la página
-          «Compartiendo» con el mismo código <code>{roomId}</code>).
-        </p>
-      ) : null}
-      {waiting && !connected && !connectionError ? (
-        <p className="muted">Conectando al servidor de sincronización…</p>
-      ) : null}
+      {ended ? <p className="muted">Sesión finalizada</p> : null}
+      {waiting && !ended && !connectionError ? <p className="muted">Esperando ubicación…</p> : null}
 
       <ViewerContextPanel sharerPos={pos} />
 
       {pos ? (
         <div className="card" style={{ marginBottom: "1rem" }}>
-          <CompassRose
-            bearingDeg={heading ?? courseDeg}
-            caption={
-              heading != null
-                ? "Brújula del dispositivo de quien comparte"
-                : courseDeg != null
-                  ? "Rumbo según trayectoria reciente de quien comparte"
-                  : "Aún sin rumbo (quien comparte puede activar la brújula o moverse un poco)"
-            }
-            compact
-          />
+          <CompassRose bearingDeg={heading ?? courseDeg} compact />
         </div>
       ) : null}
 

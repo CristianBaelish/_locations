@@ -29,10 +29,7 @@ export function useSocket(): {
 
     const onErr = (err: Error) => {
       setConnected(false);
-      setConnectionError(
-        err.message ||
-          "No se pudo conectar al servidor de sincronización. Revisá que el servicio en Render esté activo."
-      );
+      setConnectionError("Sin conexión. Reintentá en un momento.");
     };
     const onConnect = () => {
       setConnected(true);

@@ -24,7 +24,7 @@ export function useViewerDistanceKm(target: LatLng | null): {
     const t = targetRef.current;
     if (!t) return;
     if (!navigator.geolocation) {
-      setError("Geolocalización no disponible");
+      setError("Ubicación no disponible");
       return;
     }
     if (typeof window !== "undefined" && !window.isSecureContext) {
@@ -39,7 +39,7 @@ export function useViewerDistanceKm(target: LatLng | null): {
       },
       () => {
         setViewer(null);
-        setError("Activa la ubicación en el navegador para ver la distancia.");
+        setError("Ubicación no disponible");
       },
       { enableHighAccuracy: false, maximumAge: 120_000, timeout: 25_000 }
     );

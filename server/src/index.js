@@ -106,6 +106,13 @@ io.on("connection", (socket) => {
     lastLocationByRoom.set(roomId, update);
     socket.to(roomId).emit("location-update", update);
   });
+
+  socket.on("stop-sharing", ({ roomId }) => {
+    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    lastLocationByRoom.delete(roomId);
+    socket.leave(roomId);
+    socket.to(roomId).emit("sharing-ended");
+  });
 });
 
 /** Build del cliente (`npm run build` en la raíz del repo). Mismo host que la API → sin Vercel ni DNS a onrender aparte. */

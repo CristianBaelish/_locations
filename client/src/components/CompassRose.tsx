@@ -2,12 +2,10 @@ import { bearingToCardinalEs } from "../lib/geo";
 
 type Props = {
   bearingDeg: number | null;
-  /** Texto bajo la brújula (ej. fuente del dato) */
-  caption?: string;
   compact?: boolean;
 };
 
-export function CompassRose({ bearingDeg, caption, compact }: Props) {
+export function CompassRose({ bearingDeg, compact }: Props) {
   const deg = bearingDeg != null && Number.isFinite(bearingDeg) ? bearingDeg : null;
   const label = deg != null ? bearingToCardinalEs(deg) : "—";
   const size = compact ? 100 : 128;
@@ -92,13 +90,8 @@ export function CompassRose({ bearingDeg, caption, compact }: Props) {
       <div style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: compact ? "0.95rem" : "1.05rem" }}>{label}</div>
         <div className="muted" style={{ fontSize: "0.85rem" }}>
-          {deg != null ? `${deg.toFixed(0)}° respecto al norte` : "Sin rumbo aún"}
+          {deg != null ? `${deg.toFixed(0)}°` : "—"}
         </div>
-        {caption ? (
-          <div className="muted" style={{ fontSize: "0.8rem", marginTop: "0.25rem" }}>
-            {caption}
-          </div>
-        ) : null}
       </div>
     </div>
   );

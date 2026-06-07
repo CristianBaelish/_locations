@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
 import { CompassRose } from "../components/CompassRose";
-import { SyncStatus } from "../components/SyncStatus";
 import {
   describeGeolocationError,
   isSecureContextForGeolocation,
@@ -16,7 +15,6 @@ import { useDeviceHeading } from "../hooks/useDeviceHeading";
 const MIN_INTERVAL_MS = 2000;
 const MIN_MOVE_M = 5;
 const MIN_COURSE_M = 3;
-/** Mínimo desplazamiento entre lecturas GPS para mostrar rumbo en la brújula local */
 const MIN_UI_COURSE_M = 2;
 
 const isMobile =
@@ -24,7 +22,8 @@ const isMobile =
 
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { socket, connected, connectionError } = useSocket();
+  const navigate = useNavigate();
+  const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
@@ -32,8 +31,6 @@ export function Share() {
   const [copyOk, setCopyOk] = useState(false);
   const [geoRetryToken, setGeoRetryToken] = useState(0);
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
-  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
-  const [peers, setPeers] = useState<number | null>(null);
 
   const lastEmit = useRef<{ t: number; lat: number; lng: number }>({
     t: 0,
@@ -44,6 +41,7 @@ export function Share() {
   const lastGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
   const lastCourseDeg = useRef<number | null>(null);
   const hasEmitted = useRef(false);
+  const sharingActive = useRef(true);
   const lastGeoPayload = useRef<{
     lat: number;
     lng: number;
@@ -60,20 +58,39 @@ export function Share() {
 
   useJoinRoom(socket, roomId);
 
+  useEffect(() => {
+    sharingActive.current = true;
+    return () => {
+      if (!sharingActive.current || !roomId) return;
+      const s = socketRef.current;
+      if (s?.connected) {
+        s.emit("stop-sharing", { roomId });
+      }
+    };
+  }, [roomId]);
+
   const socketRef = useRef(socket);
   socketRef.current = socket;
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId) return;
+    if (!roomId || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
       s.emit("location", { roomId, ...payload });
-      setLastSentAt(Date.now());
     }
   };
+
+  function stopSharing() {
+    sharingActive.current = false;
+    const s = socketRef.current;
+    if (roomId && s?.connected) {
+      s.emit("stop-sharing", { roomId });
+    }
+    navigate("/");
+  }
 
   useEffect(() => {
     if (!socket || !roomId) return;
@@ -82,15 +99,10 @@ export function Share() {
       if (!payload) return;
       emitLocation(payload);
     };
-    const onRoomStatus = (p: { peers?: number }) => {
-      if (typeof p?.peers === "number") setPeers(p.peers);
-    };
     socket.on("connect", flushPendingLocation);
-    socket.on("room-status", onRoomStatus);
     flushPendingLocation();
     return () => {
       socket.off("connect", flushPendingLocation);
-      socket.off("room-status", onRoomStatus);
     };
   }, [socket, roomId]);
 
@@ -98,7 +110,7 @@ export function Share() {
     if (!roomId) return;
 
     if (!navigator.geolocation) {
-      setGeoErr("Tu navegador no expone geolocalización.");
+      setGeoErr("Ubicación no disponible en este navegador.");
       return;
     }
 
@@ -112,6 +124,7 @@ export function Share() {
 
     const watchId = navigator.geolocation.watchPosition(
       (p) => {
+        if (!sharingActive.current) return;
         setGeoErr(null);
         const lat = p.coords.latitude;
         const lng = p.coords.longitude;
@@ -182,6 +195,7 @@ export function Share() {
     );
 
     const heartbeatId = window.setInterval(() => {
+      if (!sharingActive.current) return;
       const payload = lastGeoPayload.current;
       if (!payload) return;
       const now = Date.now();
@@ -198,7 +212,7 @@ export function Share() {
   }, [roomId, geoRetryToken]);
 
   useEffect(() => {
-    if (deviceHeading == null || !lastGeoPayload.current || !roomId) return;
+    if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
     const id = window.setTimeout(() => {
       const base = lastGeoPayload.current;
       if (!base) return;
@@ -220,31 +234,20 @@ export function Share() {
     }
   }
 
-  async function enableCompass() {
-    await requestPermission();
-  }
-
   const displayBearing = deviceHeading ?? movementBearing ?? heading;
 
   return (
     <div className="layout">
-      <div className="row" style={{ marginBottom: "1rem" }}>
+      <div className="row" style={{ marginBottom: "1rem", justifyContent: "space-between" }}>
         <Link to="/" className="secondary" style={{ textDecoration: "none" }}>
           ← Inicio
         </Link>
+        <button type="button" className="secondary" onClick={stopSharing}>
+          Dejar de compartir
+        </button>
       </div>
 
       <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Compartiendo</h1>
-      <p className="muted">
-        Sesión: <code>{roomId}</code>
-      </p>
-
-      <SyncStatus
-        connected={connected}
-        role="share"
-        lastSentAt={lastSentAt}
-        peers={peers}
-      />
 
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
@@ -253,13 +256,10 @@ export function Share() {
       ) : null}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Enlace para quien quiera seguirte:
-        </p>
         <div className="row">
           <input className="input-code" style={{ flex: 1, minWidth: 0 }} readOnly value={viewerUrl} />
           <button type="button" onClick={copyLink} disabled={!viewerUrl}>
-            {copyOk ? "Copiado" : "Copiar"}
+            {copyOk ? "Copiado" : "Copiar enlace"}
           </button>
         </div>
       </div>
@@ -268,52 +268,24 @@ export function Share() {
         <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
           <p style={{ color: "var(--danger)", marginTop: 0 }}>{geoErr}</p>
           <button type="button" className="secondary" onClick={() => setGeoRetryToken((n) => n + 1)}>
-            Reintentar ubicación
+            Reintentar
           </button>
         </div>
       ) : !pos ? (
-        <p className="muted">Obteniendo GPS…</p>
+        <p className="muted">Obteniendo ubicación…</p>
       ) : null}
 
       {pos ? (
-        <div
-          className="card"
-          style={{ marginBottom: "1rem", cursor: displayBearing == null ? "pointer" : undefined }}
-          onClick={displayBearing == null ? () => void enableCompass() : undefined}
-          role={displayBearing == null ? "button" : undefined}
-          tabIndex={displayBearing == null ? 0 : undefined}
-          onKeyDown={
-            displayBearing == null
-              ? (e) => {
-                  if (e.key === "Enter" || e.key === " ") void enableCompass();
-                }
-              : undefined
-          }
-        >
-          <CompassRose
-            bearingDeg={displayBearing}
-            caption={
-              deviceHeading != null
-                ? "Brújula del dispositivo (magnetómetro)"
-                : movementBearing != null
-                  ? "Rumbo según tu movimiento reciente"
-                  : heading != null
-                    ? "Orientación reportada por el GPS"
-                    : "Tocá aquí o movete unos metros para ver el rumbo"
-            }
-            compact
-          />
-          {needsPermission || displayBearing == null ? (
+        <div className="card" style={{ marginBottom: "1rem" }}>
+          <CompassRose bearingDeg={displayBearing} compact />
+          {needsPermission ? (
             <button
               type="button"
               className="secondary"
               style={{ marginTop: "0.75rem" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void enableCompass();
-              }}
+              onClick={() => void requestPermission()}
             >
-              Activar brújula del teléfono
+              Activar brújula
             </button>
           ) : null}
         </div>

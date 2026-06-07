@@ -37,10 +37,10 @@ export function useSharerContext(sharerPos: LatLng | null): {
             setError(null);
           }
         })
-        .catch((e: unknown) => {
+        .catch(() => {
           if (!cancelled) {
             setData(null);
-            setError(e instanceof Error ? e.message : "Clima no disponible");
+            setError("No disponible");
           }
         })
         .finally(() => {

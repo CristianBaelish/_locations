@@ -107,9 +107,7 @@ export function StreetFollowView({
     const prevGmAuthFailure = window.gm_authFailure;
     window.gm_authFailure = () => {
       if (!cancelled) {
-        setMapsError(
-          "Google Maps rechazó la clave (restricciones del sitio, facturación o API no habilitada). En Google Cloud → Credenciales → tu clave → «Restricciones de aplicación» permití HTTPS de tu dominio (p. ej. https://locationspov.vercel.app/* y http://localhost:*). Revisá también Facturación del proyecto."
-        );
+        setMapsError("No se pudo cargar el mapa.");
       }
       if (typeof prevGmAuthFailure === "function") prevGmAuthFailure();
     };
@@ -152,7 +150,7 @@ export function StreetFollowView({
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setMapsError(e instanceof Error ? e.message : "No se pudo cargar Google Maps");
+          setMapsError("No se pudo cargar el mapa.");
         }
       });
 
@@ -219,9 +217,7 @@ export function StreetFollowView({
       if (panoRequestId.current !== myRequest) return;
 
       if (boxed.t === "timeout") {
-        setPanoHint(
-          "Street View no respondió a tiempo (red lenta o API ocupada). El mapa sigue mostrando tu posición; podés reintentar moviéndote un poco."
-        );
+        setPanoHint("Vista de calle no disponible.");
         panoRef.current?.setVisible(false);
         setPanoHasImage(false);
         return;
@@ -230,9 +226,7 @@ export function StreetFollowView({
       const result = boxed.r;
       const panoNow = panoRef.current;
       if (!panoNow || !result?.data?.location?.pano) {
-        setPanoHint(
-          "No hay Street View cerca (interior, zona rural o sin recorrido). El mapa muestra tu ubicación."
-        );
+        setPanoHint("Sin vista de calle en esta zona.");
         panoNow?.setVisible(false);
         setPanoHasImage(false);
         return;
@@ -241,9 +235,7 @@ export function StreetFollowView({
       const { data } = result;
       const loc = data.location;
       if (!loc?.pano) {
-        setPanoHint(
-          "No hay Street View cerca (interior, zona rural o sin recorrido). El mapa muestra tu ubicación."
-        );
+        setPanoHint("Sin vista de calle en esta zona.");
         panoNow.setVisible(false);
         setPanoHasImage(false);
         return;
@@ -295,15 +287,6 @@ export function StreetFollowView({
         <p className="muted" style={{ color: "var(--danger)", margin: 0 }}>
           {mapsError}
         </p>
-        <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
-          Si ves el cartel gris <em>Something went wrong</em> pero no este mensaje: abrí la consola (F12) y buscá
-          errores de <code>RefererNotAllowedMapError</code> o similar. Suele faltar en la clave la URL exacta de
-          producción en restricciones HTTP, o la cuenta de facturación en Google Cloud.
-        </p>
-        <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
-          En local: <code>VITE_GOOGLE_MAPS_API_KEY</code> en <code>.env</code> o <code>client/.env</code> y reiniciá
-          Vite. En Vercel/Render: la misma variable en el panel y <strong>volver a desplegar</strong> el front.
-        </p>
       </div>
     );
   }
@@ -321,10 +304,8 @@ export function StreetFollowView({
           {!panoHasImage && mapsReady ? (
             <div className="pano-placeholder pano-inner" style={{ position: "absolute", inset: 0, zIndex: 1 }}>
               {!position
-                ? positionSource === "remote"
-                  ? "Esperando la posición de quien comparte la sesión…"
-                  : "Esperando posición GPS para cargar Street View…"
-                : "Buscando vista de calle cercana…"}
+                ? "Esperando ubicación…"
+                : "Cargando vista de calle…"}
             </div>
           ) : null}
           <div ref={panoEl} className="pano-inner" />
