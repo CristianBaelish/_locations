@@ -11,6 +11,7 @@ import {
 } from "../lib/geoErrors";
 import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
+import { clearShareToken, readShareToken, requestStopSharing } from "../lib/shareSession";
 
 const MIN_INTERVAL_MS = 2000;
 const MIN_MOVE_M = 5;
@@ -55,45 +56,50 @@ export function Share() {
     typeof window !== "undefined" && roomId
       ? `${window.location.origin}${base}/v/${roomId}`
       : "";
+  const shareToken = roomId ? readShareToken(roomId) : null;
 
-  useJoinRoom(socket, roomId);
-
-  useEffect(() => {
-    sharingActive.current = true;
-    return () => {
-      if (!sharingActive.current || !roomId) return;
-      const s = socketRef.current;
-      if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
-      }
-    };
-  }, [roomId]);
+  useJoinRoom(socket, shareToken ? roomId : undefined);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
+  function notifyStopSharing() {
+    if (!roomId || !shareToken) return;
+    const s = socketRef.current;
+    if (s?.connected) {
+      s.emit("stop-sharing", { roomId, shareToken });
+    }
+    requestStopSharing(roomId, shareToken);
+    clearShareToken(roomId);
+  }
+
+  useEffect(() => {
+    sharingActive.current = true;
+    return () => {
+      if (!sharingActive.current) return;
+      notifyStopSharing();
+    };
+  }, [roomId, shareToken]);
+
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    if (!roomId || !shareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
-    const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
-    }
-    navigate("/");
+    notifyStopSharing();
+    navigate("/", { replace: true });
   }
 
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (!socket || !roomId || !shareToken) return;
     const flushPendingLocation = () => {
       const payload = lastGeoPayload.current;
       if (!payload) return;
@@ -104,10 +110,10 @@ export function Share() {
     return () => {
       socket.off("connect", flushPendingLocation);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, shareToken]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !shareToken) return;
 
     if (!navigator.geolocation) {
       setGeoErr("Ubicación no disponible en este navegador.");
@@ -209,10 +215,16 @@ export function Share() {
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
     };
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   useEffect(() => {
-    if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
+    if (
+      deviceHeading == null ||
+      !lastGeoPayload.current ||
+      !roomId ||
+      !shareToken ||
+      !sharingActive.current
+    ) return;
     const id = window.setTimeout(() => {
       const base = lastGeoPayload.current;
       if (!base) return;
@@ -221,7 +233,7 @@ export function Share() {
       emitLocation(payload);
     }, 400);
     return () => window.clearTimeout(id);
-  }, [deviceHeading, roomId]);
+  }, [deviceHeading, roomId, shareToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;
@@ -239,7 +251,16 @@ export function Share() {
   return (
     <div className="layout">
       <div className="row" style={{ marginBottom: "1rem", justifyContent: "space-between" }}>
-        <Link to="/" className="secondary" style={{ textDecoration: "none" }}>
+        <Link
+          to="/"
+          replace
+          className="secondary"
+          style={{ textDecoration: "none" }}
+          onClick={(event) => {
+            event.preventDefault();
+            stopSharing();
+          }}
+        >
           ← Inicio
         </Link>
         <button type="button" className="secondary" onClick={stopSharing}>
@@ -253,6 +274,17 @@ export function Share() {
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
         </p>
+      ) : null}
+
+      {!shareToken ? (
+        <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
+          <p style={{ color: "var(--danger)", marginTop: 0 }}>
+            Esta pestaña no tiene permiso para compartir esta sesión. Creá una sesión nueva desde el inicio.
+          </p>
+          <button type="button" className="secondary" onClick={() => navigate("/", { replace: true })}>
+            Ir al inicio
+          </button>
+        </div>
       ) : null}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
