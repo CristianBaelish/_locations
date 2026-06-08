@@ -43,20 +43,37 @@ app.get("/health", (_req, res) => {
   res.type("text").send("ok");
 });
 
-/** @type {Set<string>} */
-const rooms = new Set();
+/** @type {Map<string, { shareToken?: string, ended: boolean }>} */
+const rooms = new Map();
 
 /** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
+function validRoomId(roomId) {
+  return typeof roomId === "string" && ROOM_ID_RE.test(roomId);
+}
+
+function validShareToken(shareToken) {
+  return typeof shareToken === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(shareToken);
+}
+
+function activeRoomForToken(roomId, shareToken) {
+  if (!validRoomId(roomId) || !validShareToken(shareToken)) return null;
+  const room = rooms.get(roomId);
+  if (!room || room.ended || room.shareToken !== shareToken) return null;
+  return room;
+}
+
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
-  rooms.add(roomId);
-  res.json({ roomId });
+  const shareToken = nanoid(32);
+  rooms.set(roomId, { shareToken, ended: false });
+  res.json({ roomId, shareToken });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
-  res.json({ exists: rooms.has(req.params.id) });
+  const room = rooms.get(req.params.id);
+  res.json({ exists: !!room && !room.ended, ended: !!room?.ended });
 });
 
 const server = http.createServer(app);
@@ -74,27 +91,54 @@ const io = new Server(server, {
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
+function endSharing(roomId, shareToken) {
+  const room = activeRoomForToken(roomId, shareToken);
+  if (!room) return false;
+  room.ended = true;
+  delete room.shareToken;
+  lastLocationByRoom.delete(roomId);
+  io.to(roomId).emit("sharing-ended");
+  return true;
+}
+
+app.post("/api/rooms/:id/stop", (req, res) => {
+  if (!validRoomId(req.params.id)) {
+    res.status(400).json({ ok: false });
+    return;
+  }
+  const ok = endSharing(req.params.id, req.body?.shareToken);
+  res.status(ok ? 204 : 403).end();
+});
+
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
-    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    rooms.add(roomId);
+    if (!validRoomId(roomId)) return;
     socket.join(roomId);
-    const cached = lastLocationByRoom.get(roomId);
-    if (cached) {
+    const room = rooms.get(roomId);
+    const cached = room && !room.ended ? lastLocationByRoom.get(roomId) : undefined;
+    if (room?.ended) {
+      socket.emit("sharing-ended");
+    } else if (cached) {
       socket.emit("location-update", cached);
     }
     const peers = (await io.in(roomId).fetchSockets()).length;
     io.to(roomId).emit("room-status", { peers });
     if (typeof ack === "function") {
-      ack({ ok: true, peers, hasCached: !!cached });
+      ack({ ok: true, peers, exists: !!room, ended: !!room?.ended, hasCached: !!cached });
     }
   });
 
-  socket.on("location", (payload) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
-    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
-    rooms.add(roomId);
+  socket.on("location", (payload, ack) => {
+    const { roomId, shareToken, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+    const room = activeRoomForToken(roomId, shareToken);
+    if (!room) {
+      if (typeof ack === "function") ack({ ok: false });
+      return;
+    }
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      if (typeof ack === "function") ack({ ok: false });
+      return;
+    }
     const update = {
       lat,
       lng,
@@ -105,13 +149,15 @@ io.on("connection", (socket) => {
     };
     lastLocationByRoom.set(roomId, update);
     socket.to(roomId).emit("location-update", update);
+    if (typeof ack === "function") ack({ ok: true });
   });
 
-  socket.on("stop-sharing", ({ roomId }) => {
-    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    lastLocationByRoom.delete(roomId);
-    socket.leave(roomId);
-    socket.to(roomId).emit("sharing-ended");
+  socket.on("stop-sharing", ({ roomId, shareToken }, ack) => {
+    const ok = endSharing(roomId, shareToken);
+    if (validRoomId(roomId)) {
+      socket.leave(roomId);
+    }
+    if (typeof ack === "function") ack({ ok });
   });
 });
 
