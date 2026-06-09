@@ -246,6 +246,29 @@ export function Share() {
     }
   }
 
+  if (!shareToken) {
+    return (
+      <div className="layout">
+        <div className="row" style={{ marginBottom: "1rem" }}>
+          <Link to="/" replace className="secondary" style={{ textDecoration: "none" }}>
+            ← Inicio
+          </Link>
+        </div>
+
+        <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Compartiendo</h1>
+
+        <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
+          <p style={{ color: "var(--danger)", marginTop: 0 }}>
+            Esta pestaña no tiene permiso para compartir esta sesión. Creá una sesión nueva desde el inicio.
+          </p>
+          <button type="button" className="secondary" onClick={() => navigate("/", { replace: true })}>
+            Ir al inicio
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const displayBearing = deviceHeading ?? movementBearing ?? heading;
 
   return (
@@ -274,17 +297,6 @@ export function Share() {
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
         </p>
-      ) : null}
-
-      {!shareToken ? (
-        <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
-          <p style={{ color: "var(--danger)", marginTop: 0 }}>
-            Esta pestaña no tiene permiso para compartir esta sesión. Creá una sesión nueva desde el inicio.
-          </p>
-          <button type="button" className="secondary" onClick={() => navigate("/", { replace: true })}>
-            Ir al inicio
-          </button>
-        </div>
       ) : null}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
