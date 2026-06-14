@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
@@ -22,6 +22,7 @@ const isMobile =
 
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
@@ -31,6 +32,7 @@ export function Share() {
   const [copyOk, setCopyOk] = useState(false);
   const [geoRetryToken, setGeoRetryToken] = useState(0);
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
 
   const lastEmit = useRef<{ t: number; lat: number; lng: number }>({
     t: 0,
@@ -59,35 +61,67 @@ export function Share() {
   useJoinRoom(socket, roomId);
 
   useEffect(() => {
+    if (!roomId) return;
+
+    const storageKey = `shareToken:${roomId}`;
+    const params = new URLSearchParams(location.search);
+    const tokenFromUrl = params.get("shareToken");
+    if (tokenFromUrl) {
+      setShareToken(tokenFromUrl);
+      try {
+        window.sessionStorage.setItem(storageKey, tokenFromUrl);
+      } catch {
+        // Si el navegador bloquea sessionStorage, usamos el token ya cargado en memoria.
+      }
+      navigate(`/s/${roomId}`, { replace: true });
+      return;
+    }
+
+    try {
+      setShareToken(window.sessionStorage.getItem(storageKey));
+    } catch {
+      setShareToken(null);
+    }
+  }, [location.search, navigate, roomId]);
+
+  useEffect(() => {
     sharingActive.current = true;
     return () => {
       if (!sharingActive.current || !roomId) return;
       const s = socketRef.current;
       if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
+        const token = shareTokenRef.current;
+        if (token) {
+          s.emit("stop-sharing", { roomId, shareToken: token });
+        }
       }
     };
   }, [roomId]);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
+  const shareTokenRef = useRef(shareToken);
+  shareTokenRef.current = shareToken;
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
     if (!roomId || !sharingActive.current) return;
     lastGeoPayload.current = payload;
+    const token = shareTokenRef.current;
+    if (!token) return;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken: token, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
     const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
+    const token = shareTokenRef.current;
+    if (roomId && token && s?.connected) {
+      s.emit("stop-sharing", { roomId, shareToken: token });
     }
     navigate("/");
   }
