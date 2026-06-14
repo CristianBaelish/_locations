@@ -49,14 +49,19 @@ export function Home() {
       if (!res.ok) {
         throw new Error("No se pudo crear la sesión.");
       }
-      let data: { roomId?: string };
+      let data: { roomId?: string; shareToken?: string };
       try {
-        data = JSON.parse(res.text) as { roomId?: string };
+        data = JSON.parse(res.text) as { roomId?: string; shareToken?: string };
       } catch {
         throw new Error("Respuesta inválida del servidor.");
       }
-      if (!data.roomId) throw new Error("Respuesta inválida del servidor.");
-      navigate(`/s/${data.roomId}`);
+      if (!data.roomId || !data.shareToken) throw new Error("Respuesta inválida del servidor.");
+      try {
+        window.sessionStorage.setItem(`shareToken:${data.roomId}`, data.shareToken);
+      } catch {
+        // La URL de la pantalla de compartir también lleva el token por si sessionStorage no está disponible.
+      }
+      navigate(`/s/${data.roomId}?shareToken=${encodeURIComponent(data.shareToken)}`);
     } catch (e) {
       let msg = "No se pudo crear la sesión.";
       if (isAbortError(e)) {
