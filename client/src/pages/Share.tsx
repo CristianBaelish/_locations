@@ -11,6 +11,8 @@ import {
 } from "../lib/geoErrors";
 import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
+import { apiBase } from "../lib/apiBase";
+import { clearShareToken, loadShareToken } from "../lib/shareSession";
 
 const MIN_INTERVAL_MS = 2000;
 const MIN_MOVE_M = 5;
@@ -20,8 +22,28 @@ const MIN_UI_COURSE_M = 2;
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
+function stopSharingBestEffort(roomId: string, shareToken: string): void {
+  const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/stop`;
+  const body = JSON.stringify({ shareToken });
+
+  if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+    const sent = navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+    if (sent) return;
+  }
+
+  if (typeof fetch === "function") {
+    void fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: true,
+    }).catch(() => undefined);
+  }
+}
+
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
+  const shareToken = loadShareToken(roomId);
   const navigate = useNavigate();
   const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
@@ -56,18 +78,20 @@ export function Share() {
       ? `${window.location.origin}${base}/v/${roomId}`
       : "";
 
-  useJoinRoom(socket, roomId);
+  useJoinRoom(socket, shareToken ? roomId : undefined);
 
   useEffect(() => {
     sharingActive.current = true;
     return () => {
-      if (!sharingActive.current || !roomId) return;
+      if (!sharingActive.current || !roomId || !shareToken) return;
       const s = socketRef.current;
       if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
+        s.emit("stop-sharing", { roomId, shareToken });
       }
+      stopSharingBestEffort(roomId, shareToken);
+      clearShareToken(roomId);
     };
-  }, [roomId]);
+  }, [roomId, shareToken]);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
@@ -75,19 +99,23 @@ export function Share() {
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    if (!roomId || !shareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
     const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
+    if (roomId && shareToken) {
+      if (s?.connected) {
+        s.emit("stop-sharing", { roomId, shareToken });
+      }
+      stopSharingBestEffort(roomId, shareToken);
+      clearShareToken(roomId);
     }
     navigate("/");
   }
@@ -107,7 +135,7 @@ export function Share() {
   }, [socket, roomId]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !shareToken) return;
 
     if (!navigator.geolocation) {
       setGeoErr("Ubicación no disponible en este navegador.");
@@ -209,10 +237,18 @@ export function Share() {
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
     };
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   useEffect(() => {
-    if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
+    if (
+      deviceHeading == null ||
+      !lastGeoPayload.current ||
+      !roomId ||
+      !shareToken ||
+      !sharingActive.current
+    ) {
+      return;
+    }
     const id = window.setTimeout(() => {
       const base = lastGeoPayload.current;
       if (!base) return;
@@ -221,7 +257,7 @@ export function Share() {
       emitLocation(payload);
     }, 400);
     return () => window.clearTimeout(id);
-  }, [deviceHeading, roomId]);
+  }, [deviceHeading, roomId, shareToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;
@@ -253,6 +289,14 @@ export function Share() {
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
         </p>
+      ) : null}
+
+      {!shareToken ? (
+        <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
+          <p style={{ color: "var(--danger)", marginTop: 0 }}>
+            Esta sesión no puede compartir ubicación desde este navegador. Creá una sesión nueva.
+          </p>
+        </div>
       ) : null}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
