@@ -16,6 +16,8 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
+      - name: Sin claves públicas commiteadas
+        run: npm run verify:no-secrets
       - name: Coherencia deploy (vercel.json vs config)
         run: npm run verify:deploy
       - name: Build cliente
