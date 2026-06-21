@@ -26,6 +26,14 @@ export function View() {
   useJoinRoom(socket, roomId);
 
   useEffect(() => {
+    setPos(null);
+    setHeading(null);
+    setCourseDeg(null);
+    setWaiting(true);
+    setEnded(false);
+  }, [roomId]);
+
+  useEffect(() => {
     if (!socket || !roomId) return;
 
     const onUpdate = (p: UpdatePayload) => {

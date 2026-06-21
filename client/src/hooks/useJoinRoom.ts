@@ -12,6 +12,7 @@ export function useJoinRoom(socket: Socket | null, roomId: string | undefined): 
     socket.on("connect", join);
     return () => {
       socket.off("connect", join);
+      socket.emit("leave", { roomId });
     };
   }, [socket, roomId]);
 }
