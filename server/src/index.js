@@ -8,7 +8,7 @@ import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const app = express();
 
 /**
@@ -49,15 +49,30 @@ const rooms = new Set();
 /** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
+/** @type {Map<string, string>} */
+const shareTokensByRoom = new Map();
+
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
+  const shareToken = nanoid(32);
   rooms.add(roomId);
-  res.json({ roomId });
+  shareTokensByRoom.set(roomId, shareToken);
+  res.json({ roomId, shareToken });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
   res.json({ exists: rooms.has(req.params.id) });
 });
+
+function canShare(roomId, shareToken) {
+  return typeof shareToken === "string" && shareTokensByRoom.get(roomId) === shareToken;
+}
+
+function endSharing(roomId) {
+  lastLocationByRoom.delete(roomId);
+  shareTokensByRoom.delete(roomId);
+  io.to(roomId).emit("sharing-ended");
+}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -73,6 +88,21 @@ const io = new Server(server, {
 });
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+app.post("/api/rooms/:id/stop", (req, res) => {
+  const roomId = req.params.id;
+  const { shareToken } = req.body ?? {};
+  if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) {
+    res.status(400).json({ error: "invalid-room" });
+    return;
+  }
+  if (!canShare(roomId, shareToken)) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  endSharing(roomId);
+  res.json({ ok: true });
+});
 
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
@@ -90,9 +120,17 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("location", (payload) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+  socket.on("leave", async ({ roomId }) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    socket.leave(roomId);
+    const peers = (await io.in(roomId).fetchSockets()).length;
+    io.to(roomId).emit("room-status", { peers });
+  });
+
+  socket.on("location", (payload) => {
+    const { roomId, shareToken, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    if (!canShare(roomId, shareToken)) return;
     if (typeof lat !== "number" || typeof lng !== "number") return;
     rooms.add(roomId);
     const update = {
@@ -107,11 +145,11 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("location-update", update);
   });
 
-  socket.on("stop-sharing", ({ roomId }) => {
+  socket.on("stop-sharing", ({ roomId, shareToken }) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    lastLocationByRoom.delete(roomId);
+    if (!canShare(roomId, shareToken)) return;
+    endSharing(roomId);
     socket.leave(roomId);
-    socket.to(roomId).emit("sharing-ended");
   });
 });
 

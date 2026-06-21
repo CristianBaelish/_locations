@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
 import { CompassRose } from "../components/CompassRose";
+import { apiBase, fetchWithTimeout } from "../lib/apiBase";
 import {
   describeGeolocationError,
   isSecureContextForGeolocation,
@@ -17,12 +18,35 @@ const MIN_MOVE_M = 5;
 const MIN_COURSE_M = 3;
 const MIN_UI_COURSE_M = 2;
 
+type ShareLocationState = {
+  shareToken?: string;
+};
+
+function shareTokenStorageKey(roomId: string): string {
+  return `shareToken:${roomId}`;
+}
+
+function readShareToken(roomId: string | undefined, stateShareToken: string | undefined): string | null {
+  if (stateShareToken) return stateShareToken;
+  if (!roomId || typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(shareTokenStorageKey(roomId));
+  } catch {
+    return null;
+  }
+}
+
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const routerLocation = useLocation();
+  const stateShareToken =
+    typeof (routerLocation.state as ShareLocationState | null)?.shareToken === "string"
+      ? (routerLocation.state as ShareLocationState).shareToken
+      : undefined;
   const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
   const [pos, setPos] = useState<LatLng | null>(null);
@@ -31,6 +55,9 @@ export function Share() {
   const [copyOk, setCopyOk] = useState(false);
   const [geoRetryToken, setGeoRetryToken] = useState(0);
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(() =>
+    readShareToken(roomId, stateShareToken)
+  );
 
   const lastEmit = useRef<{ t: number; lat: number; lng: number }>({
     t: 0,
@@ -50,6 +77,15 @@ export function Share() {
     accuracy?: number;
   } | null>(null);
 
+  const socketRef = useRef(socket);
+  socketRef.current = socket;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const shareTokenRef = useRef(shareToken);
+  shareTokenRef.current = shareToken;
+  const deviceHeadingRef = useRef(deviceHeading);
+  deviceHeadingRef.current = deviceHeading;
+
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
     typeof window !== "undefined" && roomId
@@ -59,36 +95,74 @@ export function Share() {
   useJoinRoom(socket, roomId);
 
   useEffect(() => {
+    const token = readShareToken(roomId, stateShareToken);
+    setShareToken(token);
+    if (!roomId || !token) return;
+    try {
+      window.sessionStorage.setItem(shareTokenStorageKey(roomId), token);
+    } catch {
+      /* Storage puede estar bloqueado en modo privado; el estado de navegación alcanza para esta vista. */
+    }
+  }, [roomId, stateShareToken]);
+
+  useEffect(() => {
     sharingActive.current = true;
     return () => {
-      if (!sharingActive.current || !roomId) return;
-      const s = socketRef.current;
-      if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
-      }
+      if (!sharingActive.current) return;
+      notifyStopSharing(true);
     };
   }, [roomId]);
 
-  const socketRef = useRef(socket);
-  socketRef.current = socket;
-  const deviceHeadingRef = useRef(deviceHeading);
-  deviceHeadingRef.current = deviceHeading;
+  function postStopSharing(roomId: string, shareToken: string, useBeacon: boolean) {
+    const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/stop`;
+    const body = JSON.stringify({ shareToken });
+
+    if (useBeacon && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      const blob = new Blob([body], { type: "application/json" });
+      if (navigator.sendBeacon(url, blob)) return;
+    }
+
+    void fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body,
+      keepalive: true,
+      timeoutMs: 10_000,
+    }).catch(() => {
+      /* Best-effort fallback: Socket.io puede haber entregado ya el cierre. */
+    });
+  }
+
+  function notifyStopSharing(useBeacon: boolean) {
+    const currentRoomId = roomIdRef.current;
+    const currentShareToken = shareTokenRef.current;
+    if (!currentRoomId || !currentShareToken) return;
+
+    socketRef.current?.emit("stop-sharing", {
+      roomId: currentRoomId,
+      shareToken: currentShareToken,
+    });
+    postStopSharing(currentRoomId, currentShareToken, useBeacon);
+    try {
+      window.sessionStorage.removeItem(shareTokenStorageKey(currentRoomId));
+    } catch {
+      /* noop */
+    }
+  }
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    const currentShareToken = shareTokenRef.current;
+    if (!roomId || !currentShareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken: currentShareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
-    const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
-    }
+    notifyStopSharing(false);
     navigate("/");
   }
 
@@ -235,6 +309,7 @@ export function Share() {
   }
 
   const displayBearing = deviceHeading ?? movementBearing ?? heading;
+  const missingShareToken = !shareToken;
 
   return (
     <div className="layout">
@@ -252,6 +327,11 @@ export function Share() {
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
           {connectionError}
+        </p>
+      ) : null}
+      {missingShareToken ? (
+        <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
+          No se pudo validar esta sesión para compartir. Iniciá una sesión nueva.
         </p>
       ) : null}
 
