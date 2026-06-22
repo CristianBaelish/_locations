@@ -7,6 +7,7 @@
   "workspaces": ["server", "client"],
   "scripts": {
     "start": "npm run start -w server",
+    "test": "npm run test -w server",
     "build": "npm run build -w client",
     "ship": "node scripts/push-main.mjs",
     "verify:deploy": "node scripts/verify-deployment.mjs",
