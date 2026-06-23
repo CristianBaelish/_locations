@@ -7,7 +7,7 @@ export type XhrResult = { ok: boolean; status: number; text: string };
 export function xhrGet(
   url: string,
   timeoutMs: number,
-  onHeadersReceived: () => void
+  onHeadersReceived: () => void = () => {}
 ): Promise<XhrResult> {
   return xhrRequest("GET", url, null, timeoutMs, onHeadersReceived);
 }
@@ -15,7 +15,7 @@ export function xhrGet(
 export function xhrPost(
   url: string,
   timeoutMs: number,
-  onHeadersReceived: () => void
+  onHeadersReceived: () => void = () => {}
 ): Promise<XhrResult> {
   return xhrRequest("POST", url, null, timeoutMs, onHeadersReceived);
 }
