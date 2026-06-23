@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
@@ -20,11 +20,43 @@ const MIN_UI_COURSE_M = 2;
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
+function shareTokenFromState(state: unknown): string | null {
+  if (!state || typeof state !== "object") return null;
+  const token = (state as { shareToken?: unknown }).shareToken;
+  return typeof token === "string" && token.length > 0 ? token : null;
+}
+
+function storedShareToken(roomId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const token = window.sessionStorage.getItem(`share-token:${roomId}`);
+    return token && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistShareToken(roomId: string, shareToken: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`share-token:${roomId}`, shareToken);
+  } catch {
+    /* Navegación state ya cubre la sesión actual si storage está bloqueado. */
+  }
+}
+
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
+  const [shareToken, setShareToken] = useState<string | null>(() => {
+    if (!roomId) return null;
+    const token = shareTokenFromState(location.state) ?? storedShareToken(roomId);
+    if (token) persistShareToken(roomId, token);
+    return token;
+  });
   const [pos, setPos] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [geoErr, setGeoErr] = useState<string | null>(null);
@@ -59,15 +91,27 @@ export function Share() {
   useJoinRoom(socket, roomId);
 
   useEffect(() => {
+    if (!roomId) {
+      setShareToken(null);
+      return;
+    }
+    const token = shareTokenFromState(location.state) ?? storedShareToken(roomId);
+    if (token) {
+      persistShareToken(roomId, token);
+    }
+    setShareToken(token);
+  }, [roomId, location.state]);
+
+  useEffect(() => {
     sharingActive.current = true;
     return () => {
-      if (!sharingActive.current || !roomId) return;
+      if (!sharingActive.current || !roomId || !shareToken) return;
       const s = socketRef.current;
       if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
+        s.emit("stop-sharing", { roomId, shareToken });
       }
     };
-  }, [roomId]);
+  }, [roomId, shareToken]);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
@@ -75,25 +119,25 @@ export function Share() {
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    if (!roomId || !shareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
     const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
+    if (roomId && shareToken && s?.connected) {
+      s.emit("stop-sharing", { roomId, shareToken });
     }
     navigate("/");
   }
 
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (!socket || !roomId || !shareToken) return;
     const flushPendingLocation = () => {
       const payload = lastGeoPayload.current;
       if (!payload) return;
@@ -104,10 +148,10 @@ export function Share() {
     return () => {
       socket.off("connect", flushPendingLocation);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, shareToken]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !shareToken) return;
 
     if (!navigator.geolocation) {
       setGeoErr("Ubicación no disponible en este navegador.");
@@ -209,10 +253,16 @@ export function Share() {
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
     };
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   useEffect(() => {
-    if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
+    if (
+      deviceHeading == null ||
+      !lastGeoPayload.current ||
+      !roomId ||
+      !shareToken ||
+      !sharingActive.current
+    ) return;
     const id = window.setTimeout(() => {
       const base = lastGeoPayload.current;
       if (!base) return;
@@ -221,7 +271,7 @@ export function Share() {
       emitLocation(payload);
     }, 400);
     return () => window.clearTimeout(id);
-  }, [deviceHeading, roomId]);
+  }, [deviceHeading, roomId, shareToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;
@@ -235,6 +285,7 @@ export function Share() {
   }
 
   const displayBearing = deviceHeading ?? movementBearing ?? heading;
+  const authErr = roomId && !shareToken ? "No se pudo validar esta sesión. Volvé a iniciar el compartir." : null;
 
   return (
     <div className="layout">
@@ -255,6 +306,12 @@ export function Share() {
         </p>
       ) : null}
 
+      {authErr ? (
+        <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
+          {authErr}
+        </p>
+      ) : null}
+
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div className="row">
           <input className="input-code" style={{ flex: 1, minWidth: 0 }} readOnly value={viewerUrl} />
@@ -264,7 +321,7 @@ export function Share() {
         </div>
       </div>
 
-      {geoErr ? (
+      {authErr ? null : geoErr ? (
         <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
           <p style={{ color: "var(--danger)", marginTop: 0 }}>{geoErr}</p>
           <button type="button" className="secondary" onClick={() => setGeoRetryToken((n) => n + 1)}>
