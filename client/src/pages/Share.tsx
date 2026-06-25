@@ -11,6 +11,7 @@ import {
 } from "../lib/geoErrors";
 import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
+import { clearShareToken, readShareToken } from "../lib/shareSession";
 
 const MIN_INTERVAL_MS = 2000;
 const MIN_MOVE_M = 5;
@@ -51,6 +52,7 @@ export function Share() {
   } | null>(null);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const shareToken = readShareToken(roomId);
   const viewerUrl =
     typeof window !== "undefined" && roomId
       ? `${window.location.origin}${base}/v/${roomId}`
@@ -61,13 +63,14 @@ export function Share() {
   useEffect(() => {
     sharingActive.current = true;
     return () => {
-      if (!sharingActive.current || !roomId) return;
+      if (!sharingActive.current || !roomId || !shareToken) return;
       const s = socketRef.current;
       if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
+        s.emit("stop-sharing", { roomId, shareToken });
       }
+      clearShareToken(roomId);
     };
-  }, [roomId]);
+  }, [roomId, shareToken]);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
@@ -75,20 +78,21 @@ export function Share() {
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    if (!roomId || !shareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
     const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
+    if (roomId && shareToken && s?.connected) {
+      s.emit("stop-sharing", { roomId, shareToken });
     }
+    clearShareToken(roomId);
     navigate("/");
   }
 
@@ -104,10 +108,14 @@ export function Share() {
     return () => {
       socket.off("connect", flushPendingLocation);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, shareToken]);
 
   useEffect(() => {
     if (!roomId) return;
+    if (!shareToken) {
+      setGeoErr("No se puede compartir esta sesión desde esta pestaña. Creá una sesión nueva.");
+      return;
+    }
 
     if (!navigator.geolocation) {
       setGeoErr("Ubicación no disponible en este navegador.");
@@ -209,7 +217,7 @@ export function Share() {
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
     };
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   useEffect(() => {
     if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
@@ -221,7 +229,7 @@ export function Share() {
       emitLocation(payload);
     }, 400);
     return () => window.clearTimeout(id);
-  }, [deviceHeading, roomId]);
+  }, [deviceHeading, roomId, shareToken]);
 
   async function copyLink() {
     if (!viewerUrl) return;
