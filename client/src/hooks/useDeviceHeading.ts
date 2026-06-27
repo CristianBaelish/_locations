@@ -4,6 +4,14 @@ type DeviceOrientationWithWebkit = DeviceOrientationEvent & {
   webkitCompassHeading?: number;
 };
 
+type DeviceOrientationWithPermission = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<PermissionState>;
+};
+
+function deviceOrientationWithPermission(): DeviceOrientationWithPermission {
+  return DeviceOrientationEvent as unknown as DeviceOrientationWithPermission;
+}
+
 function readHeading(e: DeviceOrientationEvent): number | null {
   const webkit = (e as DeviceOrientationWithWebkit).webkitCompassHeading;
   if (webkit != null && Number.isFinite(webkit)) {
@@ -19,8 +27,7 @@ function iosNeedsPermission(): boolean {
   return (
     typeof DeviceOrientationEvent !== "undefined" &&
     "requestPermission" in DeviceOrientationEvent &&
-    typeof (DeviceOrientationEvent as { requestPermission?: () => Promise<string> }).requestPermission ===
-      "function"
+    typeof deviceOrientationWithPermission().requestPermission === "function"
   );
 }
 
@@ -60,9 +67,7 @@ export function useDeviceHeading(): {
       return true;
     }
     try {
-      const result = await (
-        DeviceOrientationEvent as { requestPermission: () => Promise<PermissionState> }
-      ).requestPermission();
+      const result = await deviceOrientationWithPermission().requestPermission?.();
       const ok = result === "granted";
       setPermissionGranted(ok);
       return ok;
