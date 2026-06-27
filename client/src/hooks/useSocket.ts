@@ -27,7 +27,7 @@ export function useSocket(): {
     });
     setSocket(s);
 
-    const onErr = (err: Error) => {
+    const onErr = () => {
       setConnected(false);
       setConnectionError("Sin conexión. Reintentá en un momento.");
     };

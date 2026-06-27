@@ -148,7 +148,7 @@ export function StreetFollowView({
         svRef.current = new g.maps.StreetViewService();
         setMapsReady(true);
       })
-      .catch((e: unknown) => {
+      .catch(() => {
         if (!cancelled) {
           setMapsError("No se pudo cargar el mapa.");
         }
