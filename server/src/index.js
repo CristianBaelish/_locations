@@ -43,16 +43,17 @@ app.get("/health", (_req, res) => {
   res.type("text").send("ok");
 });
 
-/** @type {Set<string>} */
-const rooms = new Set();
+/** @type {Map<string, { shareToken: string }>} */
+const rooms = new Map();
 
 /** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
-  rooms.add(roomId);
-  res.json({ roomId });
+  const shareToken = nanoid(32);
+  rooms.set(roomId, { shareToken });
+  res.json({ roomId, shareToken });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
@@ -74,10 +75,20 @@ const io = new Server(server, {
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
+function canWriteRoom(roomId, shareToken) {
+  const room = rooms.get(roomId);
+  return !!room && typeof shareToken === "string" && shareToken === room.shareToken;
+}
+
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    rooms.add(roomId);
+    if (!rooms.has(roomId)) {
+      if (typeof ack === "function") {
+        ack({ ok: false, error: "room-not-found" });
+      }
+      return;
+    }
     socket.join(roomId);
     const cached = lastLocationByRoom.get(roomId);
     if (cached) {
@@ -90,11 +101,16 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("location", (payload) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+  socket.on("location", (payload, ack) => {
+    const { roomId, shareToken, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
-    rooms.add(roomId);
+    if (!canWriteRoom(roomId, shareToken)) {
+      if (typeof ack === "function") {
+        ack({ ok: false, error: "unauthorized" });
+      }
+      return;
+    }
+    if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const update = {
       lat,
       lng,
@@ -105,13 +121,27 @@ io.on("connection", (socket) => {
     };
     lastLocationByRoom.set(roomId, update);
     socket.to(roomId).emit("location-update", update);
+    if (typeof ack === "function") {
+      ack({ ok: true });
+    }
   });
 
-  socket.on("stop-sharing", ({ roomId }) => {
+  socket.on("stop-sharing", ({ roomId, shareToken }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    if (!canWriteRoom(roomId, shareToken)) {
+      if (typeof ack === "function") {
+        ack({ ok: false, error: "unauthorized" });
+      }
+      return;
+    }
     lastLocationByRoom.delete(roomId);
+    rooms.delete(roomId);
+    io.to(roomId).emit("sharing-ended");
+    io.in(roomId).socketsLeave(roomId);
     socket.leave(roomId);
-    socket.to(roomId).emit("sharing-ended");
+    if (typeof ack === "function") {
+      ack({ ok: true });
+    }
   });
 });
 
