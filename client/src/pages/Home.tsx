@@ -9,6 +9,8 @@ import {
 import { xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
 
+const SHARE_TOKEN_STORAGE_PREFIX = "shareToken:";
+
 function isAbortError(e: unknown): boolean {
   return (
     (typeof DOMException !== "undefined" &&
@@ -16,6 +18,14 @@ function isAbortError(e: unknown): boolean {
       e.name === "AbortError") ||
     (e instanceof Error && e.name === "AbortError")
   );
+}
+
+function storeShareToken(roomId: string, shareToken: string) {
+  try {
+    window.sessionStorage.setItem(`${SHARE_TOKEN_STORAGE_PREFIX}${roomId}`, shareToken);
+  } catch {
+    // Some browsers disable storage; route state still keeps the token for this SPA navigation.
+  }
 }
 
 export function Home() {
@@ -49,14 +59,15 @@ export function Home() {
       if (!res.ok) {
         throw new Error("No se pudo crear la sesión.");
       }
-      let data: { roomId?: string };
+      let data: { roomId?: string; shareToken?: string };
       try {
-        data = JSON.parse(res.text) as { roomId?: string };
+        data = JSON.parse(res.text) as { roomId?: string; shareToken?: string };
       } catch {
         throw new Error("Respuesta inválida del servidor.");
       }
-      if (!data.roomId) throw new Error("Respuesta inválida del servidor.");
-      navigate(`/s/${data.roomId}`);
+      if (!data.roomId || !data.shareToken) throw new Error("Respuesta inválida del servidor.");
+      storeShareToken(data.roomId, data.shareToken);
+      navigate(`/s/${data.roomId}`, { state: { shareToken: data.shareToken } });
     } catch (e) {
       let msg = "No se pudo crear la sesión.";
       if (isAbortError(e)) {

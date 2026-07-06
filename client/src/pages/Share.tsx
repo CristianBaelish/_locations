@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg } from "../lib/geo";
@@ -16,12 +16,34 @@ const MIN_INTERVAL_MS = 2000;
 const MIN_MOVE_M = 5;
 const MIN_COURSE_M = 3;
 const MIN_UI_COURSE_M = 2;
+const SHARE_TOKEN_STORAGE_PREFIX = "shareToken:";
+
+type ShareRouteState = {
+  shareToken?: string;
+} | null;
 
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
+function readStoredShareToken(roomId: string): string | null {
+  try {
+    return window.sessionStorage.getItem(`${SHARE_TOKEN_STORAGE_PREFIX}${roomId}`);
+  } catch {
+    return null;
+  }
+}
+
+function storeShareToken(roomId: string, shareToken: string) {
+  try {
+    window.sessionStorage.setItem(`${SHARE_TOKEN_STORAGE_PREFIX}${roomId}`, shareToken);
+  } catch {
+    // Route state covers the current SPA session when storage is unavailable.
+  }
+}
+
 export function Share() {
   const { roomId } = useParams<{ roomId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const { socket, connectionError } = useSocket();
   const { heading: deviceHeading, needsPermission, requestPermission } = useDeviceHeading();
@@ -31,6 +53,12 @@ export function Share() {
   const [copyOk, setCopyOk] = useState(false);
   const [geoRetryToken, setGeoRetryToken] = useState(0);
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(() => {
+    if (!roomId) return null;
+    const routeToken = (location.state as ShareRouteState)?.shareToken;
+    if (routeToken) return routeToken;
+    return readStoredShareToken(roomId);
+  });
 
   const lastEmit = useRef<{ t: number; lat: number; lng: number }>({
     t: 0,
@@ -61,13 +89,27 @@ export function Share() {
   useEffect(() => {
     sharingActive.current = true;
     return () => {
-      if (!sharingActive.current || !roomId) return;
+      if (!sharingActive.current || !roomId || !shareToken) return;
       const s = socketRef.current;
       if (s?.connected) {
-        s.emit("stop-sharing", { roomId });
+        s.emit("stop-sharing", { roomId, shareToken });
       }
     };
-  }, [roomId]);
+  }, [roomId, shareToken]);
+
+  useEffect(() => {
+    if (!roomId) {
+      setShareToken(null);
+      return;
+    }
+    const routeToken = (location.state as ShareRouteState)?.shareToken;
+    if (routeToken) {
+      storeShareToken(roomId, routeToken);
+      setShareToken(routeToken);
+      return;
+    }
+    setShareToken(readStoredShareToken(roomId));
+  }, [location.state, roomId]);
 
   const socketRef = useRef(socket);
   socketRef.current = socket;
@@ -75,19 +117,19 @@ export function Share() {
   deviceHeadingRef.current = deviceHeading;
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
-    if (!roomId || !sharingActive.current) return;
+    if (!roomId || !shareToken || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
     if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+      s.emit("location", { roomId, shareToken, ...payload });
     }
   };
 
   function stopSharing() {
     sharingActive.current = false;
     const s = socketRef.current;
-    if (roomId && s?.connected) {
-      s.emit("stop-sharing", { roomId });
+    if (roomId && shareToken && s?.connected) {
+      s.emit("stop-sharing", { roomId, shareToken });
     }
     navigate("/");
   }
@@ -104,10 +146,14 @@ export function Share() {
     return () => {
       socket.off("connect", flushPendingLocation);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, shareToken]);
 
   useEffect(() => {
     if (!roomId) return;
+    if (!shareToken) {
+      setGeoErr("No se encontró la credencial privada de esta sesión. Empezá una nueva sesión.");
+      return;
+    }
 
     if (!navigator.geolocation) {
       setGeoErr("Ubicación no disponible en este navegador.");
@@ -209,7 +255,7 @@ export function Share() {
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
     };
-  }, [roomId, geoRetryToken]);
+  }, [roomId, shareToken, geoRetryToken]);
 
   useEffect(() => {
     if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
