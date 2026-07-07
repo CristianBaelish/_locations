@@ -15,7 +15,7 @@ export function xhrGet(
 export function xhrPost(
   url: string,
   timeoutMs: number,
-  onHeadersReceived: () => void
+  onHeadersReceived: () => void = () => {}
 ): Promise<XhrResult> {
   return xhrRequest("POST", url, null, timeoutMs, onHeadersReceived);
 }
