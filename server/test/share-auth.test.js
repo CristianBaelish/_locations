@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { io as Client } from "socket.io-client";
-import { server } from "../src/index.js";
+import { io, server } from "../src/index.js";
 
 let baseUrl;
 const clients = new Set();
@@ -14,12 +14,6 @@ function listen(serverInstance) {
       const address = serverInstance.address();
       resolve(`http://127.0.0.1:${address.port}`);
     });
-  });
-}
-
-function closeServer(serverInstance) {
-  return new Promise((resolve, reject) => {
-    serverInstance.close((err) => (err ? reject(err) : resolve()));
   });
 }
 
@@ -85,7 +79,7 @@ after(async () => {
   for (const socket of clients) {
     socket.close();
   }
-  await closeServer(server);
+  await new Promise((resolve) => io.close(resolve));
 });
 
 test("public room ids cannot inject location updates", async () => {
