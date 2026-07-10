@@ -8,7 +8,8 @@ import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT) || 3001;
+const envPort = process.env.PORT === undefined ? 3001 : Number(process.env.PORT);
+const PORT = Number.isFinite(envPort) ? envPort : 3001;
 const app = express();
 
 /**
@@ -43,21 +44,27 @@ app.get("/health", (_req, res) => {
   res.type("text").send("ok");
 });
 
-/** @type {Set<string>} */
-const rooms = new Set();
+/** @type {Map<string, { shareToken: string }>} */
+const rooms = new Map();
 
 /** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
-  rooms.add(roomId);
-  res.json({ roomId });
+  const shareToken = nanoid(32);
+  rooms.set(roomId, { shareToken });
+  res.json({ roomId, shareToken });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
   res.json({ exists: rooms.has(req.params.id) });
 });
+
+function sharerAuthorized(roomId, shareToken) {
+  const room = rooms.get(roomId);
+  return !!room && typeof shareToken === "string" && shareToken === room.shareToken;
+}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -77,11 +84,17 @@ const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    rooms.add(roomId);
+    if (!rooms.has(roomId)) {
+      socket.emit("sharing-ended", { roomId });
+      if (typeof ack === "function") {
+        ack({ ok: false, reason: "not_found" });
+      }
+      return;
+    }
     socket.join(roomId);
     const cached = lastLocationByRoom.get(roomId);
     if (cached) {
-      socket.emit("location-update", cached);
+      socket.emit("location-update", { roomId, ...cached });
     }
     const peers = (await io.in(roomId).fetchSockets()).length;
     io.to(roomId).emit("room-status", { peers });
@@ -90,11 +103,19 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("location", (payload) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+  socket.on("leave", async ({ roomId }) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    socket.leave(roomId);
+    if (!rooms.has(roomId)) return;
+    const peers = (await io.in(roomId).fetchSockets()).length;
+    io.to(roomId).emit("room-status", { peers });
+  });
+
+  socket.on("location", (payload) => {
+    const { roomId, shareToken, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    if (!sharerAuthorized(roomId, shareToken)) return;
     if (typeof lat !== "number" || typeof lng !== "number") return;
-    rooms.add(roomId);
     const update = {
       lat,
       lng,
@@ -104,14 +125,16 @@ io.on("connection", (socket) => {
       t: Date.now(),
     };
     lastLocationByRoom.set(roomId, update);
-    socket.to(roomId).emit("location-update", update);
+    socket.to(roomId).emit("location-update", { roomId, ...update });
   });
 
-  socket.on("stop-sharing", ({ roomId }) => {
+  socket.on("stop-sharing", ({ roomId, shareToken }) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    if (!sharerAuthorized(roomId, shareToken)) return;
+    rooms.delete(roomId);
     lastLocationByRoom.delete(roomId);
     socket.leave(roomId);
-    socket.to(roomId).emit("sharing-ended");
+    socket.to(roomId).emit("sharing-ended", { roomId });
   });
 });
 
@@ -127,5 +150,9 @@ if (existsSync(clientDist)) {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server http://0.0.0.0:${PORT}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
+  const address = server.address();
+  const actualPort = typeof address === "object" && address ? address.port : PORT;
+  console.log(`Server http://0.0.0.0:${actualPort}${existsSync(clientDist) ? " + SPA " + clientDist : ""}`);
 });
+
+export { app, io, server };

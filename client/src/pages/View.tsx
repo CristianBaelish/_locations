@@ -7,11 +7,16 @@ import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
 
 type UpdatePayload = {
+  roomId?: string;
   lat: number;
   lng: number;
   heading?: number | null;
   courseDeg?: number | null;
   t?: number;
+};
+
+type EndedPayload = {
+  roomId?: string;
 };
 
 export function View() {
@@ -29,6 +34,7 @@ export function View() {
     if (!socket || !roomId) return;
 
     const onUpdate = (p: UpdatePayload) => {
+      if (p.roomId && p.roomId !== roomId) return;
       setEnded(false);
       setWaiting(false);
       setPos({ lat: p.lat, lng: p.lng });
@@ -40,7 +46,8 @@ export function View() {
       }
     };
 
-    const onEnded = () => {
+    const onEnded = (p?: EndedPayload) => {
+      if (p?.roomId && p.roomId !== roomId) return;
       setEnded(true);
       setWaiting(false);
       setPos(null);
