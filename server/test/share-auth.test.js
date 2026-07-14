@@ -115,7 +115,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   child = spawn(process.execPath, ["src/index.js"], {
     cwd: serverRoot,
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), SHARER_DISCONNECT_GRACE_MS: "100" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await waitForServer(child);
@@ -209,4 +209,20 @@ test("REST stop fallback rejects viewers and works without a sharer socket", asy
   });
   assert.deepEqual(accepted, { ok: true, status: 200, data: { ok: true } });
   assert.deepEqual(await validEnd, { roomId });
+});
+
+test("ends a live room when its authenticated sharer disconnects", async () => {
+  const { roomId, shareToken } = await createRoom();
+  const viewer = await connectSocket();
+  const sharer = await connectSocket();
+  assert.equal((await joinRoom(viewer, roomId)).ok, true);
+
+  const update = onceEvent(viewer, "location-update");
+  sharer.emit("location", { roomId, shareToken, lat: 3, lng: 4 });
+  await update;
+
+  const ended = onceEvent(viewer, "sharing-ended");
+  sharer.close();
+  assert.deepEqual(await ended, { roomId });
+  assert.deepEqual((await requestJson(`/api/rooms/${roomId}`)).data, { exists: false });
 });

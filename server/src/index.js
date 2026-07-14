@@ -9,6 +9,10 @@ import { nanoid } from "nanoid";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
+const SHARER_DISCONNECT_GRACE_MS =
+  Number(process.env.SHARER_DISCONNECT_GRACE_MS) > 0
+    ? Number(process.env.SHARER_DISCONNECT_GRACE_MS)
+    : 30_000;
 const app = express();
 
 /**
@@ -50,6 +54,12 @@ const rooms = new Set();
 /** @type {Map<string, string>} */
 const shareTokenByRoom = new Map();
 
+/** @type {Map<string, string>} */
+const sharerSocketByRoom = new Map();
+
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const disconnectTimerByRoom = new Map();
+
 /** @type {Map<string, { roomId: string, lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
@@ -90,6 +100,10 @@ function shareTokenValid(roomId, shareToken) {
 }
 
 function endSharing(roomId) {
+  const timer = disconnectTimerByRoom.get(roomId);
+  if (timer) clearTimeout(timer);
+  disconnectTimerByRoom.delete(roomId);
+  sharerSocketByRoom.delete(roomId);
   lastLocationByRoom.delete(roomId);
   shareTokenByRoom.delete(roomId);
   rooms.delete(roomId);
@@ -143,6 +157,13 @@ io.on("connection", (socket) => {
     if (!shareTokenValid(roomId, shareToken)) return;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+    const disconnectTimer = disconnectTimerByRoom.get(roomId);
+    if (disconnectTimer) clearTimeout(disconnectTimer);
+    disconnectTimerByRoom.delete(roomId);
+    sharerSocketByRoom.set(roomId, socket.id);
+    const sharingRooms = socket.data.sharingRooms ?? new Set();
+    sharingRooms.add(roomId);
+    socket.data.sharingRooms = sharingRooms;
     const update = {
       roomId,
       lat,
@@ -162,6 +183,21 @@ io.on("connection", (socket) => {
     endSharing(roomId);
     socket.leave(roomId);
     socket.to(roomId).emit("sharing-ended", { roomId });
+  });
+
+  socket.on("disconnect", () => {
+    const sharingRooms = socket.data.sharingRooms;
+    if (!(sharingRooms instanceof Set)) return;
+    for (const roomId of sharingRooms) {
+      if (sharerSocketByRoom.get(roomId) !== socket.id || !rooms.has(roomId)) continue;
+      const timer = setTimeout(() => {
+        disconnectTimerByRoom.delete(roomId);
+        if (sharerSocketByRoom.get(roomId) !== socket.id || !rooms.has(roomId)) return;
+        endSharing(roomId);
+        io.to(roomId).emit("sharing-ended", { roomId });
+      }, SHARER_DISCONNECT_GRACE_MS);
+      disconnectTimerByRoom.set(roomId, timer);
+    }
   });
 });
 
