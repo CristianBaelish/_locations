@@ -127,7 +127,8 @@ test("only the private share token can publish or stop a room", async (t) => {
   const ended = nextEvent(viewer, "sharing-ended");
   assert.deepEqual(await emitAck(owner, "stop-sharing", { roomId, shareToken }), { ok: true });
   await ended;
-  assert.equal((await fetch(`${origin}/api/rooms/${roomId}`)).json().then((body) => body.exists), false);
+  const roomStatus = await fetch(`${origin}/api/rooms/${roomId}`).then((response) => response.json());
+  assert.equal(roomStatus.exists, false);
 });
 
 test("the authenticated HTTP fallback ends sharing while sockets are unavailable", async (t) => {
