@@ -193,3 +193,28 @@ test("join does not mint a room that was never created", async (t) => {
   );
   assert.equal(roomStatus.exists, false);
 });
+
+test("malformed socket payloads do not crash the process", async (t) => {
+  const port = await availablePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["src/index.js"], {
+    cwd: new URL("..", import.meta.url),
+    env: { ...process.env, PORT: String(port) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill();
+    await new Promise((resolve) => child.once("exit", resolve));
+  });
+  await waitForServer(origin);
+
+  const attacker = await openSocket(origin);
+  t.after(() => attacker.close());
+  for (const payload of [null, "x", 1]) {
+    assert.deepEqual(await emitAck(attacker, "location", payload), { ok: false });
+    assert.deepEqual(await emitAck(attacker, "stop-sharing", payload), { ok: false });
+  }
+  const health = await fetch(`${origin}/health`);
+  assert.equal(health.status, 200);
+  assert.equal(await health.text(), "ok");
+});
