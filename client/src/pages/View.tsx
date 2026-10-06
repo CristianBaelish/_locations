@@ -29,6 +29,14 @@ export function View() {
     if (!socket || !roomId) return;
 
     const onUpdate = (p: UpdatePayload) => {
+      if (
+        typeof p?.lat !== "number" ||
+        typeof p?.lng !== "number" ||
+        !Number.isFinite(p.lat) ||
+        !Number.isFinite(p.lng)
+      ) {
+        return;
+      }
       setEnded(false);
       setWaiting(false);
       setPos({ lat: p.lat, lng: p.lng });

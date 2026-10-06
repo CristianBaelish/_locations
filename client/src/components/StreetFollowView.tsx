@@ -93,9 +93,13 @@ export function StreetFollowView({
   const [panoHasImage, setPanoHasImage] = useState(false);
 
   const stablePosition = useMemo((): LatLng | null => {
-    if (!position) return null;
+    if (!position || !Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return null;
     return { lat: position.lat, lng: position.lng };
-  }, [position ? `${position.lat.toFixed(5)}_${position.lng.toFixed(5)}` : ""]);
+  }, [
+    position && Number.isFinite(position.lat) && Number.isFinite(position.lng)
+      ? `${position.lat.toFixed(5)}_${position.lng.toFixed(5)}`
+      : "",
+  ]);
 
   const panoDebounceMs = positionSource === "remote" ? 350 : 600;
   const debouncedPos = useDebounced(stablePosition, panoDebounceMs);
