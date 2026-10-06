@@ -93,7 +93,11 @@ io.on("connection", (socket) => {
   socket.on("location", (payload) => {
     const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
+    // JSON.parse("1e309") is Infinity, and JSON.stringify turns that into null.
+    // Viewers then crash calling toFixed on the null coordinate.
+    if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return;
+    }
     rooms.add(roomId);
     const update = {
       lat,

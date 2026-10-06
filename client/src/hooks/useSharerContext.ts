@@ -14,7 +14,10 @@ export function useSharerContext(sharerPos: LatLng | null): {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const key = sharerPos ? `${sharerPos.lat.toFixed(3)}_${sharerPos.lng.toFixed(3)}` : "";
+  const key =
+    sharerPos && Number.isFinite(sharerPos.lat) && Number.isFinite(sharerPos.lng)
+      ? `${sharerPos.lat.toFixed(3)}_${sharerPos.lng.toFixed(3)}`
+      : "";
 
   useEffect(() => {
     if (!key) {

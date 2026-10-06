@@ -18,7 +18,10 @@ export function useViewerDistanceKm(target: LatLng | null): {
   const [viewer, setViewer] = useState<LatLng | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const key = target ? `${target.lat.toFixed(4)}_${target.lng.toFixed(4)}` : "";
+  const key =
+    target && Number.isFinite(target.lat) && Number.isFinite(target.lng)
+      ? `${target.lat.toFixed(4)}_${target.lng.toFixed(4)}`
+      : "";
 
   const measure = useCallback(() => {
     const t = targetRef.current;
