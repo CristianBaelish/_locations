@@ -16,5 +16,4 @@ interface ImportMeta {
 /** Callback opcional de la API de Maps JS ante error de autenticación / referrer. */
 interface Window {
   gm_authFailure?: () => void;
-  __livePovMapsReady?: () => void;
 }

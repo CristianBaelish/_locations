@@ -9,7 +9,7 @@ type Props = {
   position: LatLng | null;
   /** Degrees, 0–360, when the device reports it */
   headingDeg?: number | null;
-  /** Rumbo por trayectoria (prioridad sobre headingDeg para el POV de Street View) */
+  /** Rumbo por trayectoria. La brújula (headingDeg) manda la cámara si existe. */
   courseDeg?: number | null;
   /** `remote` = visor (sin GPS); `device` = quien comparte */
   positionSource?: "device" | "remote";
@@ -276,10 +276,10 @@ export function StreetFollowView({
 
       const { course, heading: deviceH } = povSourceRef.current;
       let povHeading = 0;
-      if (course != null) {
-        povHeading = course;
-      } else if (deviceH != null) {
+      if (deviceH != null) {
         povHeading = deviceH;
+      } else if (course != null) {
+        povHeading = course;
       } else if (loc.latLng) {
         povHeading = g.geometry.spherical.computeHeading(loc.latLng, latLng);
       }
@@ -308,7 +308,7 @@ export function StreetFollowView({
   useEffect(() => {
     if (!panoHasImage || !panoRef.current) return;
     const { course, heading: deviceH } = povSourceRef.current;
-    const deg = course ?? deviceH;
+    const deg = deviceH ?? course;
     if (deg == null) return;
     panoRef.current.setPov({ heading: deg, pitch: 0 });
   }, [courseDeg, headingDeg, panoHasImage]);

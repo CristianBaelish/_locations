@@ -17,8 +17,8 @@ const HEARTBEAT_MS = 15_000;
 const MIN_MOVE_M = 5;
 const MIN_COURSE_M = 3;
 const MIN_UI_COURSE_M = 2;
-const HEADING_EMIT_DEG = 12;
-const HEADING_EMIT_MS = 5_000;
+const HEADING_EMIT_DEG = 2;
+const HEADING_EMIT_MS = 180;
 
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -233,7 +233,7 @@ export function Share() {
     const now = Date.now();
     const prev = base.heading;
     const turned = prev == null || smallestAngleDelta(prev, deviceHeading) >= HEADING_EMIT_DEG;
-    if (!turned && now - lastHeadingEmit.current < HEADING_EMIT_MS) return;
+    if (!turned || now - lastHeadingEmit.current < HEADING_EMIT_MS) return;
     lastHeadingEmit.current = now;
     emitLocation({ ...base, heading: deviceHeading });
   }, [deviceHeading, roomId]);

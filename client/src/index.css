@@ -119,6 +119,15 @@ button:disabled {
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid #2d3a4f;
+  /* El color-scheme oscuro de la página invierte el canvas de Street View. */
+  color-scheme: light;
+}
+
+.map-box canvas,
+.pano-box canvas,
+.gm-style {
+  color-scheme: light;
+  filter: none;
 }
 
 @media (min-width: 800px) {

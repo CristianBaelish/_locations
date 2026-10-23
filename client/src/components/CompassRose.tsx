@@ -69,7 +69,7 @@ export function CompassRose({ bearingDeg, compact }: Props) {
             transform: deg != null ? `rotate(${deg}deg)` : "rotate(0deg)",
             opacity: deg != null ? 1 : 0,
             visibility: deg != null ? "visible" : "hidden",
-            transition: "transform 0.15s ease-out, opacity 0.2s",
+            transition: "transform 0.2s linear, opacity 0.2s",
           }}
         />
         <div
@@ -88,9 +88,11 @@ export function CompassRose({ bearingDeg, compact }: Props) {
         />
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: compact ? "0.95rem" : "1.05rem" }}>{label}</div>
-        <div className="muted" style={{ fontSize: "0.85rem" }}>
+        <div style={{ fontWeight: 600, fontSize: compact ? "0.95rem" : "1.05rem" }}>
           {deg != null ? `${deg.toFixed(0)}°` : "—"}
+        </div>
+        <div className="muted" style={{ fontSize: "0.85rem" }}>
+          {label}
         </div>
       </div>
     </div>
