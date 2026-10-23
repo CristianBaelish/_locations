@@ -48,6 +48,12 @@ const CARDINAL_ES = [
   "Noroeste",
 ] as const;
 
+/** Menor diferencia entre dos rumbos, en grados [0, 180]. */
+export function smallestAngleDelta(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
 /** Punto cardinal aproximado en español (8 rumbos). */
 export function bearingToCardinalEs(deg: number): string {
   const x = ((deg % 360) + 360) % 360;

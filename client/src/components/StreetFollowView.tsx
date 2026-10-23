@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadGoogleMaps } from "../lib/mapsLoader";
 import { useDebounced } from "../hooks/useDebounced";
+import { distanceMeters } from "../lib/geo";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -63,6 +64,9 @@ async function findNearestPanorama(
 }
 
 const PANO_SEARCH_TIMEOUT_MS = 25_000;
+/** Misma foto de calle mientras el punto no se aleje. Pedir una nueva en cada paso agota la cuota y la vista se congela. */
+const PANO_MOVE_M = 35;
+const PANO_RETRY_MS = 20_000;
 
 export function StreetFollowView({
   position,
@@ -78,6 +82,7 @@ export function StreetFollowView({
   const panoRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const svRef = useRef<google.maps.StreetViewService | null>(null);
   const panoRequestId = useRef(0);
+  const panoTrack = useRef({ lat: Number.NaN, lng: Number.NaN, at: 0, hasImage: false });
   const povSourceRef = useRef<{ course: number | null; heading: number | null }>({
     course: null,
     heading: null,
@@ -91,6 +96,7 @@ export function StreetFollowView({
   const [mapsReady, setMapsReady] = useState(false);
   const [panoHint, setPanoHint] = useState<string | null>(null);
   const [panoHasImage, setPanoHasImage] = useState(false);
+  const [panoRetry, setPanoRetry] = useState(0);
 
   const stablePosition = useMemo((): LatLng | null => {
     if (!position) return null;
@@ -103,12 +109,9 @@ export function StreetFollowView({
   useEffect(() => {
     let cancelled = false;
 
-    /** Google llama esto si la clave es inválida, el referrer no está permitido o falta facturación. */
     const prevGmAuthFailure = window.gm_authFailure;
     window.gm_authFailure = () => {
-      if (!cancelled) {
-        setMapsError("No se pudo cargar el mapa.");
-      }
+      if (!cancelled) setMapsError("No se pudo cargar el mapa.");
       if (typeof prevGmAuthFailure === "function") prevGmAuthFailure();
     };
 
@@ -137,8 +140,6 @@ export function StreetFollowView({
         map.setStreetView(pano);
 
         const marker = new g.maps.Marker({
-          map,
-          position: defaultCenter,
           title: "Posición compartida",
         });
 
@@ -182,16 +183,28 @@ export function StreetFollowView({
   }, [mapsReady]);
 
   useEffect(() => {
-    if (!mapsReady || !stablePosition) return;
+    if (!mapsReady) return;
     const map = mapRef.current;
     const marker = markerRef.current;
     if (!map || !marker) return;
 
+    if (!stablePosition) {
+      marker.setMap(null);
+      panoRequestId.current += 1;
+      panoTrack.current = { lat: Number.NaN, lng: Number.NaN, at: 0, hasImage: false };
+      panoRef.current?.setVisible(false);
+      setPanoHasImage(false);
+      setPanoHint(null);
+      return;
+    }
+
     const g = google.maps;
     const latLng = new g.LatLng(stablePosition.lat, stablePosition.lng);
-    map.panTo(latLng);
-    map.setZoom(17);
+    const firstFix = marker.getMap() == null;
+    marker.setMap(map);
     marker.setPosition(latLng);
+    map.panTo(latLng);
+    if (firstFix) map.setZoom(17);
   }, [mapsReady, stablePosition]);
 
   useEffect(() => {
@@ -203,44 +216,63 @@ export function StreetFollowView({
     const g = google.maps;
     const latLng = new g.LatLng(debouncedPos.lat, debouncedPos.lng);
 
+    const track = panoTrack.current;
+    const haveFix = Number.isFinite(track.lat) && Number.isFinite(track.lng);
+    const moved = !haveFix || distanceMeters(track, debouncedPos) >= PANO_MOVE_M;
+    const retryDue = !track.hasImage && track.at > 0 && Date.now() - track.at >= PANO_RETRY_MS;
+    if (haveFix && !moved && !retryDue) return;
+
     const myRequest = ++panoRequestId.current;
-    setPanoHint(null);
-    setPanoHasImage(false);
-    pano.setVisible(false);
+    const hadImage = track.hasImage;
+    track.at = Date.now();
+    track.lat = debouncedPos.lat;
+    track.lng = debouncedPos.lng;
+    if (!hadImage) setPanoHint(null);
+
+    let timeoutId = 0;
+    const timeout = new Promise<{ t: "timeout" }>((resolve) => {
+      timeoutId = window.setTimeout(() => resolve({ t: "timeout" }), PANO_SEARCH_TIMEOUT_MS);
+    });
 
     void Promise.race([
       findNearestPanorama(sv, latLng).then((r) => ({ t: "ok" as const, r })),
-      new Promise<{ t: "timeout" }>((resolve) => {
-        window.setTimeout(() => resolve({ t: "timeout" }), PANO_SEARCH_TIMEOUT_MS);
-      }),
+      timeout,
     ]).then((boxed) => {
+      window.clearTimeout(timeoutId);
       if (panoRequestId.current !== myRequest) return;
 
-      if (boxed.t === "timeout") {
-        setPanoHint("Vista de calle no disponible.");
+      const keepCurrent = () => {
+        if (hadImage) return;
+        setPanoHint("Sin vista de calle en esta zona.");
         panoRef.current?.setVisible(false);
+        panoTrack.current.hasImage = false;
         setPanoHasImage(false);
+        window.setTimeout(() => {
+          if (panoRequestId.current !== myRequest) return;
+          setPanoRetry((n) => n + 1);
+        }, PANO_RETRY_MS);
+      };
+
+      if (boxed.t === "timeout") {
+        keepCurrent();
         return;
       }
 
       const result = boxed.r;
       const panoNow = panoRef.current;
       if (!panoNow || !result?.data?.location?.pano) {
-        setPanoHint("Sin vista de calle en esta zona.");
-        panoNow?.setVisible(false);
-        setPanoHasImage(false);
+        keepCurrent();
         return;
       }
 
       const { data } = result;
       const loc = data.location;
       if (!loc?.pano) {
-        setPanoHint("Sin vista de calle en esta zona.");
-        panoNow.setVisible(false);
-        setPanoHasImage(false);
+        keepCurrent();
         return;
       }
       panoNow.setPano(loc.pano);
+      panoTrack.current.hasImage = true;
 
       const { course, heading: deviceH } = povSourceRef.current;
       let povHeading = 0;
@@ -271,7 +303,7 @@ export function StreetFollowView({
         });
       });
     });
-  }, [mapsReady, debouncedPos]);
+  }, [mapsReady, debouncedPos, panoRetry]);
 
   useEffect(() => {
     if (!panoHasImage || !panoRef.current) return;

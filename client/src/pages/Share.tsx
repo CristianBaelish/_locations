@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
-import { distanceMeters, initialBearingDeg } from "../lib/geo";
+import { distanceMeters, initialBearingDeg, smallestAngleDelta } from "../lib/geo";
 import { CompassRose } from "../components/CompassRose";
 import {
   describeGeolocationError,
@@ -13,9 +13,12 @@ import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
 
 const MIN_INTERVAL_MS = 2000;
+const HEARTBEAT_MS = 15_000;
 const MIN_MOVE_M = 5;
 const MIN_COURSE_M = 3;
 const MIN_UI_COURSE_M = 2;
+const HEADING_EMIT_DEG = 12;
+const HEADING_EMIT_MS = 5_000;
 
 const isMobile =
   typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -29,6 +32,7 @@ export function Share() {
   const [heading, setHeading] = useState<number | null>(null);
   const [geoErr, setGeoErr] = useState<string | null>(null);
   const [copyOk, setCopyOk] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
   const [geoRetryToken, setGeoRetryToken] = useState(0);
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
 
@@ -49,6 +53,7 @@ export function Share() {
     courseDeg: number | null;
     accuracy?: number;
   } | null>(null);
+  const lastHeadingEmit = useRef(0);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
@@ -74,13 +79,25 @@ export function Share() {
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
-  const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
+  const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>, reliable = false) => {
     if (!roomId || !sharingActive.current) return;
     lastGeoPayload.current = payload;
     const s = socketRef.current;
-    if (s?.connected) {
-      s.emit("location", { roomId, ...payload });
+    if (!s) return;
+    if (!s.connected) {
+      s.connect();
+      return;
     }
+    const body = { roomId, ...payload };
+    if (!reliable) {
+      s.emit("location", body);
+      return;
+    }
+    s.timeout(8_000).emit("location", body, (err: unknown) => {
+      if (!err || !sharingActive.current) return;
+      if (s.connected) s.disconnect();
+      s.connect();
+    });
   };
 
   function stopSharing() {
@@ -198,12 +215,10 @@ export function Share() {
       if (!sharingActive.current) return;
       const payload = lastGeoPayload.current;
       if (!payload) return;
-      const now = Date.now();
-      if (now - lastEmit.current.t >= MIN_INTERVAL_MS) {
-        lastEmit.current.t = now;
-        emitLocation(payload);
-      }
-    }, MIN_INTERVAL_MS);
+      const heading = deviceHeadingRef.current ?? payload.heading;
+      lastEmit.current.t = Date.now();
+      emitLocation({ ...payload, heading }, true);
+    }, HEARTBEAT_MS);
 
     return () => {
       navigator.geolocation.clearWatch(watchId);
@@ -212,15 +227,15 @@ export function Share() {
   }, [roomId, geoRetryToken]);
 
   useEffect(() => {
-    if (deviceHeading == null || !lastGeoPayload.current || !roomId || !sharingActive.current) return;
-    const id = window.setTimeout(() => {
-      const base = lastGeoPayload.current;
-      if (!base) return;
-      const payload = { ...base, heading: deviceHeading };
-      lastGeoPayload.current = payload;
-      emitLocation(payload);
-    }, 400);
-    return () => window.clearTimeout(id);
+    if (deviceHeading == null || !roomId || !sharingActive.current) return;
+    const base = lastGeoPayload.current;
+    if (!base) return;
+    const now = Date.now();
+    const prev = base.heading;
+    const turned = prev == null || smallestAngleDelta(prev, deviceHeading) >= HEADING_EMIT_DEG;
+    if (!turned && now - lastHeadingEmit.current < HEADING_EMIT_MS) return;
+    lastHeadingEmit.current = now;
+    emitLocation({ ...base, heading: deviceHeading });
   }, [deviceHeading, roomId]);
 
   async function copyLink() {
@@ -228,10 +243,15 @@ export function Share() {
     try {
       await navigator.clipboard.writeText(viewerUrl);
       setCopyOk(true);
-      window.setTimeout(() => setCopyOk(false), 2000);
     } catch {
+      const input = linkInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
       setCopyOk(false);
     }
+    window.setTimeout(() => setCopyOk(false), 2000);
   }
 
   const displayBearing = deviceHeading ?? movementBearing ?? heading;
@@ -257,7 +277,14 @@ export function Share() {
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div className="row">
-          <input className="input-code" style={{ flex: 1, minWidth: 0 }} readOnly value={viewerUrl} />
+          <input
+            ref={linkInputRef}
+            className="input-code"
+            style={{ flex: 1, minWidth: 0 }}
+            readOnly
+            value={viewerUrl}
+            aria-label="Enlace para seguir"
+          />
           <button type="button" onClick={copyLink} disabled={!viewerUrl}>
             {copyOk ? "Copiado" : "Copiar enlace"}
           </button>

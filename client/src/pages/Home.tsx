@@ -9,6 +9,27 @@ import {
 import { xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
 
+const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+function roomIdFromInput(raw: string): string {
+  const trimmed = raw.trim();
+  const fromPath = (path: string) => {
+    const match = path.match(/\/(?:v|s)\/([^/?#]+)/);
+    if (!match) return null;
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  };
+  try {
+    const url = new URL(trimmed);
+    return fromPath(url.pathname) ?? trimmed;
+  } catch {
+    return fromPath(trimmed) ?? trimmed;
+  }
+}
+
 function isAbortError(e: unknown): boolean {
   return (
     (typeof DOMException !== "undefined" &&
@@ -71,9 +92,13 @@ export function Home() {
   }
 
   function joinViewer() {
-    const id = code.trim();
+    const id = roomIdFromInput(code);
     if (!id) {
       setErr("Ingresá un código de sesión.");
+      return;
+    }
+    if (!ROOM_ID_RE.test(id)) {
+      setErr("El código no es válido.");
       return;
     }
     navigate(`/v/${id}`);

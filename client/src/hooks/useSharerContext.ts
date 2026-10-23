@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { fetchSharerWeatherContext, type SharerWeatherContext } from "../lib/openMeteo";
 import type { LatLng } from "../components/StreetFollowView";
 
+const WEATHER_REFRESH_MS = 10 * 60 * 1000;
+
 export function useSharerContext(sharerPos: LatLng | null): {
   data: SharerWeatherContext | null;
   loading: boolean;
@@ -9,6 +11,7 @@ export function useSharerContext(sharerPos: LatLng | null): {
 } {
   const posRef = useRef(sharerPos);
   posRef.current = sharerPos;
+  const dataRef = useRef<SharerWeatherContext | null>(null);
 
   const [data, setData] = useState<SharerWeatherContext | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,39 +21,45 @@ export function useSharerContext(sharerPos: LatLng | null): {
 
   useEffect(() => {
     if (!key) {
+      dataRef.current = null;
       setData(null);
       setError(null);
+      setLoading(false);
       return;
     }
 
-    const p = posRef.current;
-    if (!p) return;
-
     let cancelled = false;
-    const t = window.setTimeout(() => {
-      setLoading(true);
-      setError(null);
+
+    const load = () => {
+      const p = posRef.current;
+      if (!p) return;
+      if (!dataRef.current) {
+        setLoading(true);
+        setError(null);
+      }
       void fetchSharerWeatherContext(p.lat, p.lng)
         .then((d) => {
-          if (!cancelled) {
-            setData(d);
-            setError(null);
-          }
+          if (cancelled) return;
+          dataRef.current = d;
+          setData(d);
+          setError(null);
         })
         .catch(() => {
-          if (!cancelled) {
-            setData(null);
-            setError("No disponible");
-          }
+          if (cancelled) return;
+          if (!dataRef.current) setError("No disponible");
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 900);
+    };
+
+    const t = window.setTimeout(load, 900);
+    const interval = window.setInterval(load, WEATHER_REFRESH_MS);
 
     return () => {
       cancelled = true;
       window.clearTimeout(t);
+      window.clearInterval(interval);
     };
   }, [key]);
 

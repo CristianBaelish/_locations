@@ -5,7 +5,7 @@ import type { LatLng } from "../components/StreetFollowView";
 
 /**
  * Distancia desde el dispositivo del visor hasta quien comparte.
- * Solo pide ubicación cuando cambia la posición redondeada del objetivo (evita bucles).
+ * Sigue la posición del visor con watchPosition; el botón fuerza una lectura nueva.
  */
 export function useViewerDistanceKm(target: LatLng | null): {
   km: number | null;
@@ -14,51 +14,73 @@ export function useViewerDistanceKm(target: LatLng | null): {
 } {
   const targetRef = useRef(target);
   targetRef.current = target;
+  const hasFix = useRef(false);
 
   const [viewer, setViewer] = useState<LatLng | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const key = target ? `${target.lat.toFixed(4)}_${target.lng.toFixed(4)}` : "";
+  const active = target != null;
 
-  const measure = useCallback(() => {
-    const t = targetRef.current;
-    if (!t) return;
+  const onFix = useCallback((lat: number, lng: number) => {
+    hasFix.current = true;
+    setViewer({ lat, lng });
+    setError(null);
+  }, []);
+
+  const onFail = useCallback((message: string, clear: boolean) => {
+    if (clear || !hasFix.current) {
+      if (clear) {
+        hasFix.current = false;
+        setViewer(null);
+      }
+      setError(message);
+    }
+  }, []);
+
+  const refresh = useCallback(() => {
+    if (!targetRef.current) return;
     if (!navigator.geolocation) {
-      setError("Ubicación no disponible");
+      onFail("Ubicación no disponible", true);
       return;
     }
     if (typeof window !== "undefined" && !window.isSecureContext) {
-      setViewer(null);
-      setError(messageInsecureGeolocationContext());
+      onFail(messageInsecureGeolocationContext(), true);
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (p) => {
-        setViewer({ lat: p.coords.latitude, lng: p.coords.longitude });
-        setError(null);
-      },
-      () => {
-        setViewer(null);
-        setError("Ubicación no disponible");
-      },
-      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 25_000 }
+      (p) => onFix(p.coords.latitude, p.coords.longitude),
+      () => onFail("Ubicación no disponible", false),
+      { enableHighAccuracy: false, maximumAge: 0, timeout: 25_000 }
     );
-  }, []);
+  }, [onFail, onFix]);
 
   useEffect(() => {
-    if (!key) {
+    if (!active) {
+      hasFix.current = false;
       setViewer(null);
       setError(null);
       return;
     }
-    measure();
-  }, [key, measure]);
+    if (!navigator.geolocation) {
+      onFail("Ubicación no disponible", true);
+      return;
+    }
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      onFail(messageInsecureGeolocationContext(), true);
+      return;
+    }
+    const id = navigator.geolocation.watchPosition(
+      (p) => onFix(p.coords.latitude, p.coords.longitude),
+      () => onFail("Ubicación no disponible", false),
+      { enableHighAccuracy: false, maximumAge: 15_000, timeout: 25_000 }
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [active, onFail, onFix]);
 
   const km = useMemo(() => {
-    const t = targetRef.current;
-    if (!viewer || !t) return null;
-    return Math.round(distanceKm(viewer, t) * 100) / 100;
-  }, [viewer, key]);
+    if (!viewer || !target) return null;
+    return Math.round(distanceKm(viewer, target) * 100) / 100;
+  }, [viewer, target]);
 
-  return { km, error, refresh: measure };
+  return { km, error, refresh };
 }

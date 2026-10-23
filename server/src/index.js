@@ -49,14 +49,57 @@ const rooms = new Set();
 /** @type {Map<string, { lat: number, lng: number, heading: number | null, courseDeg: number | null, accuracy?: number, t: number }>} */
 const lastLocationByRoom = new Map();
 
+/** @type {Map<string, number>} */
+const roomSeenAt = new Map();
+
+const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
+
+function touchRoom(roomId) {
+  rooms.add(roomId);
+  roomSeenAt.set(roomId, Date.now());
+}
+
+function validLatLng(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+const roomSweep = setInterval(() => {
+  const cutoff = Date.now() - ROOM_TTL_MS;
+  for (const [id, seen] of roomSeenAt) {
+    if (seen >= cutoff) continue;
+    roomSeenAt.delete(id);
+    rooms.delete(id);
+    lastLocationByRoom.delete(id);
+  }
+}, 10 * 60 * 1000);
+if (typeof roomSweep.unref === "function") roomSweep.unref();
+
 app.post("/api/rooms", (_req, res) => {
   const roomId = nanoid(10);
-  rooms.add(roomId);
+  touchRoom(roomId);
   res.json({ roomId });
 });
 
 app.get("/api/rooms/:id", (req, res) => {
   res.json({ exists: rooms.has(req.params.id) });
+});
+
+/** Respaldo si el socket se corta: el visor puede seguir leyendo la última ubicación. */
+app.get("/api/rooms/:id/location", (req, res) => {
+  const id = req.params.id;
+  if (!ROOM_ID_RE.test(id)) {
+    res.status(400).json({ error: "Código inválido" });
+    return;
+  }
+  res.set("Cache-Control", "no-store");
+  const loc = lastLocationByRoom.get(id);
+  if (!loc) {
+    res.status(204).end();
+    return;
+  }
+  res.json(loc);
 });
 
 const server = http.createServer(app);
@@ -72,12 +115,10 @@ const io = new Server(server, {
   pingInterval: 25_000,
 });
 
-const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
-
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    rooms.add(roomId);
+    touchRoom(roomId);
     socket.join(roomId);
     const cached = lastLocationByRoom.get(roomId);
     if (cached) {
@@ -90,21 +131,27 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("location", (payload) => {
+  socket.on("location", (payload, ack) => {
     const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
-    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    if (typeof lat !== "number" || typeof lng !== "number") return;
-    rooms.add(roomId);
+    const reply = (body) => {
+      if (typeof ack === "function") ack(body);
+    };
+    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId) || !validLatLng(lat, lng)) {
+      reply({ ok: false });
+      return;
+    }
+    touchRoom(roomId);
     const update = {
       lat,
       lng,
       heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
       courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
-      accuracy: typeof accuracy === "number" ? accuracy : undefined,
+      accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : undefined,
       t: Date.now(),
     };
     lastLocationByRoom.set(roomId, update);
     socket.to(roomId).emit("location-update", update);
+    reply({ ok: true, t: update.t });
   });
 
   socket.on("stop-sharing", ({ roomId }) => {

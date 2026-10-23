@@ -21,7 +21,8 @@ export function useSocket(): {
       /** Solo polling: evita fallos de WebSocket en proxies (Vercel, móvil). */
       transports: ["polling"],
       timeout: SOCKET_CONNECT_TIMEOUT_MS,
-      reconnectionAttempts: 24,
+      /** Sin tope: un proxy (Vercel) puede cortar el polling a los ~2 min y hay que seguir reintentando. */
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2_000,
       reconnectionDelayMax: 15_000,
     });
