@@ -68,26 +68,6 @@ const PANO_SEARCH_TIMEOUT_MS = 25_000;
 const PANO_MOVE_M = 35;
 const PANO_RETRY_MS = 20_000;
 
-function paintMapLight(el: HTMLElement) {
-  el.style.setProperty("color-scheme", "only light");
-  el.style.setProperty("filter", "none");
-}
-
-/** El modo oscuro del teléfono invierte el canvas y agranda el cartel de Google. */
-function watchMapLight(mapEl: HTMLElement, panoEl: HTMLElement): () => void {
-  const paint = () => {
-    for (const root of [mapEl, panoEl]) {
-      paintMapLight(root);
-      root.querySelectorAll<HTMLElement>("canvas, .gm-style, .widget-scene").forEach(paintMapLight);
-    }
-  };
-  paint();
-  const obs = new MutationObserver(paint);
-  obs.observe(mapEl, { childList: true, subtree: true });
-  obs.observe(panoEl, { childList: true, subtree: true });
-  return () => obs.disconnect();
-}
-
 export function StreetFollowView({
   position,
   headingDeg,
@@ -135,29 +115,22 @@ export function StreetFollowView({
       if (typeof prevGmAuthFailure === "function") prevGmAuthFailure();
     };
 
-    let stopLight = () => {};
-
     loadGoogleMaps()
       .then((g) => {
         if (cancelled || !mapEl.current || !panoEl.current) return;
 
-        const mapElNode = mapEl.current;
-        const panoElNode = panoEl.current;
-        stopLight = watchMapLight(mapElNode, panoElNode);
-
         const defaultCenter = { lat: 40.4168, lng: -3.7038 };
-        const map = new g.maps.Map(mapElNode, {
+        const map = new g.maps.Map(mapEl.current, {
           center: defaultCenter,
           zoom: 6,
           colorScheme: "LIGHT",
-          backgroundColor: "#e8eef4",
           mapTypeControl: true,
           mapTypeControlOptions: { style: g.maps.MapTypeControlStyle.DROPDOWN_MENU },
           streetViewControl: false,
           fullscreenControl: true,
         });
 
-        const pano = new g.maps.StreetViewPanorama(panoElNode, {
+        const pano = new g.maps.StreetViewPanorama(panoEl.current, {
           visible: false,
           addressControl: true,
           linksControl: true,
@@ -185,7 +158,6 @@ export function StreetFollowView({
 
     return () => {
       cancelled = true;
-      stopLight?.();
       window.gm_authFailure = prevGmAuthFailure;
     };
   }, []);

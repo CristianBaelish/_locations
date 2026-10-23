@@ -119,19 +119,7 @@ button:disabled {
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid #2d3a4f;
-}
-
-.map-box,
-.pano-box,
-.map-box *,
-.pano-box * {
-  color-scheme: only light !important;
-  forced-color-adjust: none;
-}
-
-.map-box canvas,
-.pano-box canvas {
-  filter: none !important;
+  color-scheme: only light;
 }
 
 @media (min-width: 800px) {
