@@ -1,51 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { useJoinRoom } from "../hooks/useJoinRoom";
-import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
+import { StreetFollowView } from "../components/StreetFollowView";
 import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
 import { apiBase, fetchWithTimeout } from "../lib/apiBase";
-
-type UpdatePayload = {
-  lat: number;
-  lng: number;
-  heading?: number | null;
-  courseDeg?: number | null;
-  t?: number;
-};
+import {
+  applyLiveFix,
+  applyLocationMiss,
+  applySharingEnded,
+  initialViewerLocationState,
+  type LiveFix,
+  type ViewerLocationState,
+} from "../lib/viewerLocation";
 
 export function View() {
   const { roomId } = useParams<{ roomId: string }>();
   const { socket, connectionError } = useSocket();
-  const [pos, setPos] = useState<LatLng | null>(null);
-  const [heading, setHeading] = useState<number | null>(null);
-  const [courseDeg, setCourseDeg] = useState<number | null>(null);
-  const [waiting, setWaiting] = useState(true);
-  const [ended, setEnded] = useState(false);
-  const [receivedAt, setReceivedAt] = useState<number | null>(null);
+  const locRef = useRef<ViewerLocationState>(initialViewerLocationState());
+  const [loc, setLoc] = useState(locRef.current);
   const [now, setNow] = useState(() => Date.now());
-  const lastStamp = useRef(0);
-  const endedRef = useRef(false);
+
+  const commit = useCallback((next: ViewerLocationState) => {
+    if (next === locRef.current) return;
+    locRef.current = next;
+    setLoc(next);
+  }, []);
 
   useJoinRoom(socket, roomId);
-
-  function applyUpdate(p: UpdatePayload) {
-    const stamp = typeof p.t === "number" && Number.isFinite(p.t) ? p.t : Date.now();
-    if (stamp < lastStamp.current) return;
-    lastStamp.current = stamp;
-    endedRef.current = false;
-    setEnded(false);
-    setWaiting(false);
-    setReceivedAt(stamp);
-    setPos({ lat: p.lat, lng: p.lng });
-    if ("heading" in p) {
-      setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
-    }
-    if ("courseDeg" in p) {
-      setCourseDeg(p.courseDeg != null && Number.isFinite(p.courseDeg) ? p.courseDeg : null);
-    }
-  }
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -55,19 +38,12 @@ export function View() {
   useEffect(() => {
     if (!socket || !roomId) return;
 
-    const onUpdate = (p: UpdatePayload) => {
-      applyUpdate(p);
+    const onUpdate = (p: LiveFix) => {
+      commit(applyLiveFix(locRef.current, p, Date.now()));
     };
 
     const onEnded = () => {
-      endedRef.current = true;
-      lastStamp.current = Date.now();
-      setEnded(true);
-      setWaiting(false);
-      setPos(null);
-      setHeading(null);
-      setCourseDeg(null);
-      setReceivedAt(null);
+      commit(applySharingEnded(locRef.current));
     };
 
     socket.on("location-update", onUpdate);
@@ -76,7 +52,7 @@ export function View() {
       socket.off("location-update", onUpdate);
       socket.off("sharing-ended", onEnded);
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, commit]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -84,16 +60,22 @@ export function View() {
     let inflight = false;
 
     const pull = () => {
-      if (cancelled || inflight || endedRef.current) return;
+      if (cancelled || inflight) return;
       inflight = true;
+      const seqAtStart = locRef.current.seq;
       const root = apiBase();
       const url = `${root}/api/rooms/${encodeURIComponent(roomId)}/location`;
       void fetchWithTimeout(url, { timeoutMs: 8_000, cache: "no-store" })
         .then(async (res) => {
-          if (cancelled || res.status === 204 || !res.ok) return;
-          const data = (await res.json()) as UpdatePayload;
-          if (typeof data.lat !== "number" || typeof data.lng !== "number") return;
-          applyUpdate(data);
+          if (cancelled) return;
+          if (res.status === 204) {
+            commit(applyLocationMiss(locRef.current, seqAtStart));
+            return;
+          }
+          if (!res.ok) return;
+          const data = (await res.json()) as LiveFix;
+          if (cancelled) return;
+          commit(applyLiveFix(locRef.current, data, Date.now()));
         })
         .catch(() => {
           /* el socket puede seguir vivo */
@@ -109,7 +91,7 @@ export function View() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [roomId]);
+  }, [roomId, commit]);
 
   return (
     <div className="layout layout-wide">
@@ -120,17 +102,17 @@ export function View() {
       </div>
 
       <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Siguiendo</h1>
-      {receivedAt != null && !ended ? (
+      {loc.receivedAt != null && !loc.ended ? (
         <p
           className="muted"
           style={{
             marginTop: "-0.25rem",
-            color: now - receivedAt > 20_000 ? "var(--danger)" : undefined,
+            color: now - loc.receivedAt > 20_000 ? "var(--danger)" : undefined,
           }}
         >
-          {now - receivedAt > 20_000
+          {now - loc.receivedAt > 20_000
             ? "Sin actualización reciente. Reintentando…"
-            : `Ubicación de hace ${Math.max(0, Math.round((now - receivedAt) / 1000))} s`}
+            : `Ubicación de hace ${Math.max(0, Math.round((now - loc.receivedAt) / 1000))} s`}
         </p>
       ) : null}
 
@@ -140,21 +122,23 @@ export function View() {
         </p>
       ) : null}
 
-      {ended ? <p className="muted">Sesión finalizada</p> : null}
-      {waiting && !ended && !connectionError ? <p className="muted">Esperando ubicación…</p> : null}
+      {loc.ended ? <p className="muted">Sesión finalizada</p> : null}
+      {loc.waiting && !loc.ended && !connectionError ? (
+        <p className="muted">Esperando ubicación…</p>
+      ) : null}
 
-      <ViewerContextPanel sharerPos={pos} />
+      <ViewerContextPanel sharerPos={loc.pos} />
 
-      {pos ? (
+      {loc.pos ? (
         <div className="card" style={{ marginBottom: "1rem" }}>
-          <CompassRose bearingDeg={heading ?? courseDeg} compact />
+          <CompassRose bearingDeg={loc.heading ?? loc.courseDeg} compact />
         </div>
       ) : null}
 
       <StreetFollowView
-        position={pos}
-        headingDeg={heading}
-        courseDeg={courseDeg}
+        position={loc.pos}
+        headingDeg={loc.heading}
+        courseDeg={loc.courseDeg}
         positionSource="remote"
         layout="viewer"
       />
