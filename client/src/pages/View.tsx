@@ -5,6 +5,7 @@ import { useJoinRoom } from "../hooks/useJoinRoom";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
+import { WarmStatus } from "../components/WarmStatus";
 import { apiBase, fetchWithTimeout } from "../lib/apiBase";
 
 type UpdatePayload = {
@@ -119,7 +120,7 @@ export function View() {
         </Link>
       </div>
 
-      <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Siguiendo</h1>
+      <h1 className="page-title">Estás siguiendo este recorrido</h1>
       {receivedAt != null && !ended ? (
         <p
           className="muted"
@@ -141,7 +142,15 @@ export function View() {
       ) : null}
 
       {ended ? <p className="muted">Sesión finalizada</p> : null}
-      {waiting && !ended && !connectionError ? <p className="muted">Esperando ubicación…</p> : null}
+      {waiting && !ended && !connectionError ? (
+        <div className="card">
+          <WarmStatus
+            title="Esperando a quien comparte"
+            detail="Cuando empiece a caminar, la calle aparece acá."
+            trackTime
+          />
+        </div>
+      ) : null}
 
       <ViewerContextPanel sharerPos={pos} />
 

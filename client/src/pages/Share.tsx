@@ -4,6 +4,7 @@ import { useSocket } from "../hooks/useSocket";
 import { StreetFollowView, type LatLng } from "../components/StreetFollowView";
 import { distanceMeters, initialBearingDeg, smallestAngleDelta } from "../lib/geo";
 import { CompassRose } from "../components/CompassRose";
+import { WarmStatus } from "../components/WarmStatus";
 import {
   describeGeolocationError,
   isSecureContextForGeolocation,
@@ -267,7 +268,10 @@ export function Share() {
         </button>
       </div>
 
-      <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: 0 }}>Compartiendo</h1>
+      <h1 className="page-title">
+        <span className="live-dot" aria-hidden="true" />
+        Ya estás compartiendo
+      </h1>
 
       {connectionError ? (
         <p style={{ color: "var(--danger)", marginBottom: "1rem" }} role="alert">
@@ -292,14 +296,20 @@ export function Share() {
       </div>
 
       {geoErr ? (
-        <div className="card" style={{ marginBottom: "1rem", borderColor: "#5c3d3d" }} role="alert">
+        <div className="card card-alert" role="alert">
           <p style={{ color: "var(--danger)", marginTop: 0 }}>{geoErr}</p>
           <button type="button" className="secondary" onClick={() => setGeoRetryToken((n) => n + 1)}>
             Reintentar
           </button>
         </div>
       ) : !pos ? (
-        <p className="muted">Obteniendo ubicación…</p>
+        <div className="card">
+          <WarmStatus
+            title="Buscando dónde estás"
+            detail="Si el teléfono pregunta, aceptá la ubicación. Sin eso no podemos mostrar la calle."
+            trackTime
+          />
+        </div>
       ) : null}
 
       {pos ? (

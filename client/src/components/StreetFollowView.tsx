@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadGoogleMaps } from "../lib/mapsLoader";
+import { loadGoogleMaps, resetGoogleMaps } from "../lib/mapsLoader";
+import { WarmStatus } from "./WarmStatus";
 import { useDebounced } from "../hooks/useDebounced";
 import { distanceMeters } from "../lib/geo";
 
@@ -93,7 +94,9 @@ export function StreetFollowView({
   };
 
   const [mapsError, setMapsError] = useState<string | null>(null);
+  const [mapsLimited, setMapsLimited] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [panoHint, setPanoHint] = useState<string | null>(null);
   const [panoHasImage, setPanoHasImage] = useState(false);
   const [panoRetry, setPanoRetry] = useState(0);
@@ -107,13 +110,14 @@ export function StreetFollowView({
   const debouncedPos = useDebounced(stablePosition, panoDebounceMs);
 
   useEffect(() => {
-    let cancelled = false;
+    const onLimited = () => setMapsLimited(true);
+    if (window.__livePovMapsLimited) setMapsLimited(true);
+    window.addEventListener("livepov-maps-limited", onLimited);
+    return () => window.removeEventListener("livepov-maps-limited", onLimited);
+  }, []);
 
-    const prevGmAuthFailure = window.gm_authFailure;
-    window.gm_authFailure = () => {
-      if (!cancelled) setMapsError("No se pudo cargar el mapa.");
-      if (typeof prevGmAuthFailure === "function") prevGmAuthFailure();
-    };
+  useEffect(() => {
+    let cancelled = false;
 
     loadGoogleMaps()
       .then((g) => {
@@ -150,17 +154,16 @@ export function StreetFollowView({
         svRef.current = new g.maps.StreetViewService();
         setMapsReady(true);
       })
-      .catch((e: unknown) => {
+      .catch(() => {
         if (!cancelled) {
-          setMapsError("No se pudo cargar el mapa.");
+          setMapsError("No pudimos abrir el mapa. Revisá la conexión e intentá de nuevo.");
         }
       });
 
     return () => {
       cancelled = true;
-      window.gm_authFailure = prevGmAuthFailure;
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!mapsReady || !mapEl.current || !panoEl.current) return;
@@ -314,36 +317,58 @@ export function StreetFollowView({
     panoRef.current.setPov({ heading: deg, pitch: 0 });
   }, [courseDeg, headingDeg, panoHasImage]);
 
-  if (mapsError) {
-    return (
-      <div className="card">
-        <p className="muted" style={{ color: "var(--danger)", margin: 0 }}>
-          {mapsError}
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div className="map-stage">
+      {mapsLimited ? (
+        <p className="note">
+          Google muestra el mapa en modo de prueba: la marca de agua y la calle en negativo se van
+          cuando la facturación del proyecto de la clave queda activa.
+        </p>
+      ) : null}
+      {mapsError ? (
+        <div className="card card-alert" role="alert">
+          <p style={{ color: "var(--danger)", marginTop: 0 }}>{mapsError}</p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              resetGoogleMaps();
+              setMapsError(null);
+              setMapsReady(false);
+              setLoadAttempt((n) => n + 1);
+            }}
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : null}
       {panoHint ? (
         <p className="muted" style={{ margin: "0 0 0.5rem" }}>
           {panoHint}
         </p>
       ) : null}
-      <div className={`split${layout === "viewer" ? " split--viewer" : ""}`}>
+      {!mapsError ? <div className="map-frame">
+        {!mapsReady && !mapsError ? (
+          <div className="map-loading">
+            <WarmStatus title="Preparando el mapa" detail="Ya casi está." />
+          </div>
+        ) : null}
+        <div className={`split${layout === "viewer" ? " split--viewer" : ""}`}>
         <div ref={mapEl} className="map-box" />
         <div className="pano-box">
           {!panoHasImage && mapsReady ? (
             <div className="pano-placeholder pano-inner" style={{ position: "absolute", inset: 0, zIndex: 1 }}>
-              {!position
-                ? "Esperando ubicación…"
-                : "Cargando vista de calle…"}
+              <WarmStatus
+                title={!position ? "Esperando la ubicación" : "Buscando la calle"}
+                detail={!position ? "Cuando llegue el punto, aparece el recorrido." : "Un momento, estamos cerca."}
+                layout="row"
+              />
             </div>
           ) : null}
           <div ref={panoEl} className="pano-inner" />
         </div>
-      </div>
+        </div>
+      </div> : null}
     </div>
   );
 }

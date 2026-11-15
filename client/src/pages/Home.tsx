@@ -8,6 +8,7 @@ import {
 } from "../lib/apiBase";
 import { xhrPost } from "../lib/xhrRequest";
 import { InstallAppHint } from "../components/InstallAppHint";
+import { WarmStatus } from "../components/WarmStatus";
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
@@ -106,35 +107,47 @@ export function Home() {
 
   return (
     <div className="layout">
-      <h1 style={{ fontSize: "1.35rem", fontWeight: 600, marginTop: 0 }}>
-        Ubicación en vivo
-      </h1>
+      <header className="hero">
+        <p className="eyebrow">En vivo</p>
+        <h1>Compartí el lugar donde estás</h1>
+        <p className="lede">Quien tenga el enlace ve la calle, el clima y hacia dónde vas.</p>
+      </header>
 
       {err ? (
-        <p style={{ color: "var(--danger)" }} role="alert">
+        <p className="note note-alert" role="alert">
           {err}
         </p>
       ) : null}
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Compartir</h2>
-        <button type="button" onClick={startSharing} disabled={busy} aria-busy={busy}>
-          {busy ? "Creando sesión…" : "Empezar a compartir"}
-        </button>
+      <div className="card">
+        <h2>Compartir</h2>
+        {busy ? (
+          <WarmStatus
+            title="Abriendo tu sesión"
+            detail="No se trabó. Si el servidor estaba dormido, el primer intento puede tardar un minuto."
+            trackTime
+          />
+        ) : (
+          <button type="button" onClick={startSharing}>
+            Compartir mi ubicación
+          </button>
+        )}
       </div>
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Seguir</h2>
+      <div className="card">
+        <h2>Seguir a alguien</h2>
+        <p className="muted">Pegá el enlace o el código que te pasaron.</p>
         <div className="row">
           <input
             className="input-code"
-            placeholder="Código de sesión"
+            placeholder="Código o enlace"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && joinViewer()}
             aria-label="Código de sesión"
+            disabled={busy}
           />
-          <button type="button" className="secondary" onClick={joinViewer}>
+          <button type="button" className="secondary" onClick={joinViewer} disabled={busy}>
             Entrar
           </button>
         </div>

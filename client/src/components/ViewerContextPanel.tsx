@@ -16,7 +16,7 @@ export function ViewerContextPanel({ sharerPos }: Props) {
 
   return (
     <div className="card viewer-context" style={{ marginBottom: "1rem" }}>
-      <h2 style={{ fontSize: "0.95rem", marginTop: 0, marginBottom: "0.85rem" }}>Contexto</h2>
+      <h2>En ese lugar</h2>
       <div className="context-tiles">
         <div className="context-tile">
           <span className="context-tile-icon" style={{ color: "var(--muted)" }}>
