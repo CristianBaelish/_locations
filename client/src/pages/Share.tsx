@@ -48,7 +48,7 @@ export function Share() {
   const [movementBearing, setMovementBearing] = useState<number | null>(null);
   const [resuming, setResuming] = useState(false);
   const [accuracy, setAccuracy] = useState<number | null>(null);
-  const [watchers, setWatchers] = useState<number | null>(null);
+  const [watchers, setWatchers] = useState(0);
   const [sendOk, setSendOk] = useState(false);
   const canSend = typeof navigator !== "undefined" && typeof navigator.share === "function";
 
@@ -78,7 +78,7 @@ export function Share() {
       ? `${window.location.origin}${base}/v/${roomId}`
       : "";
 
-  useJoinRoom(socket, roomId);
+  useJoinRoom(socket, roomId, "sharer");
 
   useEffect(() => {
     sharingActive.current = true;
@@ -149,9 +149,14 @@ export function Share() {
 
   useEffect(() => {
     if (!socket) return;
-    const onStatus = (payload: { peers?: number }) => {
-      if (typeof payload?.peers !== "number" || !Number.isFinite(payload.peers)) return;
-      setWatchers(Math.max(0, payload.peers - 1));
+    const onStatus = (payload: { watchers?: number; peers?: number }) => {
+      if (typeof payload?.watchers === "number" && Number.isFinite(payload.watchers)) {
+        setWatchers(Math.max(0, Math.round(payload.watchers)));
+        return;
+      }
+      if (typeof payload?.peers === "number" && Number.isFinite(payload.peers)) {
+        setWatchers(Math.max(0, Math.round(payload.peers) - 1));
+      }
     };
     socket.on("room-status", onStatus);
     return () => {
@@ -422,6 +427,10 @@ export function Share() {
         <span className="live-dot" aria-hidden="true" />
         Ya estás compartiendo
       </h1>
+      <p className="watcher-count" role="status">
+        <span className={`live-dot${watchers > 0 ? "" : " is-quiet"}`} aria-hidden="true" />
+        {watchers === 1 ? "Hay 1 persona mirando." : `Hay ${watchers} personas mirando.`}
+      </p>
       <p className="muted" style={{ marginTop: "-0.25rem" }}>
         Dejá esta pantalla adelante, con el celular despierto. Si pasás a otra app o se apaga la pantalla, el
         enlace queda en el último lugar hasta que vuelvas.
@@ -457,15 +466,6 @@ export function Share() {
             </button>
           ) : null}
         </div>
-        {watchers != null ? (
-          <p className="muted" role="status" style={{ margin: "0.65rem 0 0" }}>
-            {watchers === 0
-              ? "Todavía nadie abrió el enlace."
-              : watchers === 1
-                ? "Hay alguien mirando."
-                : `Hay ${watchers} personas mirando.`}
-          </p>
-        ) : null}
       </div>
 
       {geoErr ? (

@@ -385,6 +385,20 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.live-dot.is-quiet {
+  animation: none;
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.watcher-count {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: -0.15rem 0 0.85rem;
+  font-weight: 700;
+}
+
 .note {
   background: #fff7ef;
   border: 1px solid var(--line);

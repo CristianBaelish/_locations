@@ -36,7 +36,7 @@ export function View() {
   const pullRef = useRef<() => void>(() => {});
   const lastKick = useRef(0);
 
-  useJoinRoom(socket, roomId);
+  useJoinRoom(socket, roomId, "viewer");
 
   function endSession() {
     endedRef.current = true;

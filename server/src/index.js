@@ -148,20 +148,40 @@ function endRoom(roomId) {
   rooms.delete(roomId);
   roomSeenAt.delete(roomId);
   io.to(roomId).emit("sharing-ended");
-  io.to(roomId).emit("room-status", { peers: 0 });
+  io.to(roomId).emit("room-status", { watchers: 0, peers: 1 });
   return true;
 }
 
-function emitPeerCount(roomId, exceptId) {
+function watcherTotal(list, exceptId) {
+  const ids = new Set();
+  for (const peer of list) {
+    if (exceptId && peer.id === exceptId) continue;
+    if (peer.data?.role !== "viewer") continue;
+    const id =
+      typeof peer.data.clientId === "string" && peer.data.clientId.length > 0
+        ? peer.data.clientId
+        : peer.id;
+    ids.add(id);
+  }
+  return ids.size;
+}
+
+function publishWatcherCount(roomId, list) {
+  const watchers = watcherTotal(list);
+  io.to(roomId).emit("room-status", { watchers, peers: watchers + 1 });
+  return watchers;
+}
+
+function emitWatcherCount(roomId, exceptId) {
   void io
     .in(roomId)
     .fetchSockets()
     .then((list) => {
-      const peers = list.filter((peer) => peer.id !== exceptId).length;
-      io.to(roomId).emit("room-status", { peers });
+      const watchers = watcherTotal(list, exceptId);
+      io.to(roomId).emit("room-status", { watchers, peers: watchers + 1 });
     })
     .catch(() => {
-      /* la cuenta de mirones es accesoria */
+      /* la cuenta de quien mira es accesoria */
     });
 }
 
@@ -198,7 +218,7 @@ app.post("/api/rooms/:id/stop", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("join", async ({ roomId }, ack) => {
+  socket.on("join", async ({ roomId, role, clientId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
     if (stoppedRooms.has(roomId)) {
       socket.emit("sharing-ended");
@@ -206,15 +226,18 @@ io.on("connection", (socket) => {
       return;
     }
     touchRoom(roomId);
+    socket.data.role = role === "sharer" || role === "viewer" ? role : null;
+    socket.data.clientId =
+      typeof clientId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(clientId) ? clientId : socket.id;
     socket.join(roomId);
     const cached = lastLocationByRoom.get(roomId);
     if (cached) {
       socket.emit("location-update", cached);
     }
-    const peers = (await io.in(roomId).fetchSockets()).length;
-    io.to(roomId).emit("room-status", { peers });
+    const list = await io.in(roomId).fetchSockets();
+    const watchers = publishWatcherCount(roomId, list);
     if (typeof ack === "function") {
-      ack({ ok: true, peers, hasCached: !!cached });
+      ack({ ok: true, peers: watchers + 1, watchers, hasCached: !!cached });
     }
   });
 
@@ -241,7 +264,7 @@ io.on("connection", (socket) => {
   socket.on("disconnecting", () => {
     for (const roomId of socket.rooms) {
       if (roomId === socket.id || !ROOM_ID_RE.test(roomId) || stoppedRooms.has(roomId)) continue;
-      emitPeerCount(roomId, socket.id);
+      emitWatcherCount(roomId, socket.id);
     }
   });
 });
