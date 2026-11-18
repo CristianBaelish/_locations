@@ -55,6 +55,12 @@ const roomSeenAt = new Map();
 /** Salas cerradas con «Dejar de compartir». Un POST tardío no las revive. */
 const stoppedRooms = new Set();
 
+/** Última generación que quien comparte mandó en primer plano. */
+const liveEpochByRoom = new Map();
+
+/** Generación con la que la pantalla pasó a segundo plano. */
+const pausedEpochByRoom = new Map();
+
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
 
 function touchRoom(roomId) {
@@ -68,12 +74,31 @@ function validLatLng(lat, lng) {
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
+function readEpoch(value) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 1_000_000) return null;
+  return value;
+}
+
+function liveEpoch(roomId) {
+  return liveEpochByRoom.get(roomId) ?? 0;
+}
+
 function saveLocation(roomId, payload) {
   const { lat, lng, heading, accuracy, courseDeg } = payload ?? {};
   if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId) || stoppedRooms.has(roomId) || !validLatLng(lat, lng)) {
     return null;
   }
+  const epoch = readEpoch(payload?.epoch);
+  const pausedEpoch = pausedEpochByRoom.get(roomId);
+  const paused = pausedEpoch != null && pausedEpoch >= liveEpoch(roomId);
+  if (paused && (epoch == null || epoch <= pausedEpoch)) {
+    return { ignored: true };
+  }
   touchRoom(roomId);
+  if (epoch != null) {
+    liveEpochByRoom.set(roomId, Math.max(liveEpoch(roomId), epoch));
+    if (pausedEpoch == null || epoch > pausedEpoch) pausedEpochByRoom.delete(roomId);
+  }
   const update = {
     lat,
     lng,
@@ -81,6 +106,7 @@ function saveLocation(roomId, payload) {
     courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
     accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : undefined,
     t: Date.now(),
+    paused: false,
   };
   lastLocationByRoom.set(roomId, update);
   return update;
@@ -93,6 +119,8 @@ const roomSweep = setInterval(() => {
     roomSeenAt.delete(id);
     rooms.delete(id);
     lastLocationByRoom.delete(id);
+    liveEpochByRoom.delete(id);
+    pausedEpochByRoom.delete(id);
   }
 }, 10 * 60 * 1000);
 if (typeof roomSweep.unref === "function") roomSweep.unref();
@@ -145,6 +173,8 @@ function endRoom(roomId) {
   if (stoppedRooms.has(roomId)) return false;
   stoppedRooms.add(roomId);
   lastLocationByRoom.delete(roomId);
+  liveEpochByRoom.delete(roomId);
+  pausedEpochByRoom.delete(roomId);
   rooms.delete(roomId);
   roomSeenAt.delete(roomId);
   io.to(roomId).emit("sharing-ended");
@@ -198,12 +228,45 @@ app.post("/api/rooms/:id/location", (req, res) => {
     return;
   }
   const update = saveLocation(id, req.body);
+  if (update?.ignored) {
+    res.json({ ok: true, paused: true });
+    return;
+  }
   if (!update) {
     res.status(400).json({ error: "Ubicación inválida" });
     return;
   }
   io.to(id).emit("location-update", update);
   res.json({ ok: true, t: update.t });
+});
+
+app.post("/api/rooms/:id/pause", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = req.params.id;
+  if (typeof id !== "string" || !ROOM_ID_RE.test(id)) {
+    res.status(400).json({ error: "Código inválido" });
+    return;
+  }
+  if (stoppedRooms.has(id)) {
+    res.status(409).json({ ended: true });
+    return;
+  }
+  const epoch = readEpoch(req.body?.epoch);
+  if (epoch == null) {
+    res.status(400).json({ error: "Generación inválida" });
+    return;
+  }
+  if (epoch < liveEpoch(id)) {
+    res.json({ ok: true, paused: false });
+    return;
+  }
+  touchRoom(id);
+  pausedEpochByRoom.set(id, epoch);
+  const loc = lastLocationByRoom.get(id);
+  const notice = loc ? { ...loc, paused: true } : { paused: true };
+  if (loc) lastLocationByRoom.set(id, notice);
+  io.to(id).emit("sharing-paused", notice);
+  res.json({ ok: true, paused: true });
 });
 
 app.post("/api/rooms/:id/stop", (req, res) => {
@@ -247,6 +310,10 @@ io.on("connection", (socket) => {
     };
     const roomId = payload?.roomId;
     const update = saveLocation(roomId, payload);
+    if (update?.ignored) {
+      reply({ ok: true, paused: true });
+      return;
+    }
     if (!update) {
       reply({ ok: false });
       return;

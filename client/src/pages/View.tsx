@@ -16,6 +16,7 @@ type UpdatePayload = {
   courseDeg?: number | null;
   t?: number;
   ended?: boolean;
+  paused?: boolean;
 };
 
 export function View() {
@@ -26,7 +27,9 @@ export function View() {
   const [courseDeg, setCourseDeg] = useState<number | null>(null);
   const [waiting, setWaiting] = useState(true);
   const [ended, setEnded] = useState(false);
-  const [receivedAt, setReceivedAt] = useState<number | null>(null);
+  const [locatedAt, setLocatedAt] = useState<number | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [pausedSince, setPausedSince] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const lastStamp = useRef(0);
   const lastClientReceipt = useRef(0);
@@ -46,7 +49,14 @@ export function View() {
     setPos(null);
     setHeading(null);
     setCourseDeg(null);
-    setReceivedAt(null);
+    setLocatedAt(null);
+    setPaused(false);
+    setPausedSince(null);
+  }
+
+  function setPause(on: boolean) {
+    setPaused(on);
+    setPausedSince((prev) => (on ? (prev ?? Date.now()) : null));
   }
 
   function applyUpdate(p: UpdatePayload) {
@@ -54,13 +64,16 @@ export function View() {
       if (p.ended) endSession();
       return;
     }
+    const stamp = typeof p.t === "number" && Number.isFinite(p.t) ? p.t : null;
+    if (p.paused === true && (stamp == null || stamp >= lastStamp.current)) setPause(true);
+    else if (p.paused === false && stamp != null && stamp > lastStamp.current) setPause(false);
     if (typeof p.lat !== "number" || typeof p.lng !== "number") return;
-    const stamp = typeof p.t === "number" && Number.isFinite(p.t) ? p.t : Date.now();
-    if (stamp <= lastStamp.current) return;
-    lastStamp.current = stamp;
+    const located = stamp ?? Date.now();
+    if (located <= lastStamp.current) return;
+    lastStamp.current = located;
     lastClientReceipt.current = Date.now();
     setWaiting(false);
-    setReceivedAt(Date.now());
+    setLocatedAt(located);
     setPos({ lat: p.lat, lng: p.lng });
     if ("heading" in p) {
       setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
@@ -87,9 +100,11 @@ export function View() {
     };
 
     socket.on("location-update", onUpdate);
+    socket.on("sharing-paused", onUpdate);
     socket.on("sharing-ended", onEnded);
     return () => {
       socket.off("location-update", onUpdate);
+      socket.off("sharing-paused", onUpdate);
       socket.off("sharing-ended", onEnded);
     };
   }, [socket, roomId]);
@@ -104,7 +119,7 @@ export function View() {
       inflight = true;
       const root = apiBase();
       const url = `${root}/api/rooms/${encodeURIComponent(roomId)}/location`;
-      void fetchWithTimeout(url, { timeoutMs: 8_000, cache: "no-store" })
+      void fetchWithTimeout(url, { timeoutMs: 15_000, cache: "no-store" })
         .then(async (res) => {
           if (cancelled || res.status === 204 || !res.ok) return;
           const data = (await res.json()) as UpdatePayload;
@@ -154,6 +169,10 @@ export function View() {
     return () => window.clearInterval(id);
   }, []);
 
+  const pointAge = locatedAt != null ? Math.max(0, now - locatedAt) : null;
+  const pointIsOld = pointAge != null && pointAge > 60_000;
+  const pauseShown = paused && pausedSince != null && now - pausedSince >= 2_000;
+
   return (
     <div className="layout layout-wide">
       <div className="row" style={{ marginBottom: "1rem" }}>
@@ -163,17 +182,21 @@ export function View() {
       </div>
 
       <h1 className="page-title">Estás siguiendo este recorrido</h1>
-      {receivedAt != null && !ended ? (
+      {pauseShown && !ended && !pointIsOld ? (
+        <p className="muted" role="status" style={{ marginTop: "-0.25rem", color: "var(--danger)" }}>
+          En pausa. Quien comparte salió de esta pantalla. El punto queda en el último lugar hasta que vuelva.
+        </p>
+      ) : pointAge != null && !ended && !pointIsOld ? (
         <p
           className="muted"
           style={{
             marginTop: "-0.25rem",
-            color: now - receivedAt > 35_000 ? "var(--danger)" : undefined,
+            color: pointAge > 35_000 ? "var(--danger)" : undefined,
           }}
         >
-          {now - receivedAt > 35_000
+          {pointAge > 35_000
             ? "Quedó en el último lugar. Quien comparte tiene que volver a la app, con la pantalla despierta."
-            : `Ubicación de hace ${Math.max(0, Math.round((now - receivedAt) / 1000))} s`}
+            : `Ubicación de hace ${Math.max(0, Math.round(pointAge / 1000))} s`}
         </p>
       ) : null}
 
@@ -184,7 +207,19 @@ export function View() {
       ) : null}
 
       {ended ? <p className="muted">Sesión finalizada</p> : null}
-      {waiting && !ended && !connectionError ? (
+      {pointIsOld && !ended ? (
+        <div className="card">
+          <WarmStatus
+            title="Esperando la ubicación de ahora"
+            detail={
+              pauseShown
+                ? "Quien comparte salió de esta pantalla. La calle vuelve cuando la reabra."
+                : "El último lugar es de hace unos minutos. La calle vuelve cuando el teléfono manda el punto actual."
+            }
+          />
+        </div>
+      ) : null}
+      {waiting && !ended && !connectionError && !pointIsOld && !pauseShown ? (
         <div className="card">
           <WarmStatus
             title="Esperando a quien comparte"
@@ -194,7 +229,7 @@ export function View() {
         </div>
       ) : null}
 
-      {ended ? null : (
+      {ended || pointIsOld ? null : (
         <>
           <ViewerContextPanel sharerPos={pos} />
 

@@ -13,11 +13,13 @@ import {
 import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
 import { apiBase, fetchWithTimeout } from "../lib/apiBase";
-import { kickSocket, onPageResume } from "../lib/pageResume";
+import { kickSocket } from "../lib/pageResume";
 import { InstallAppHint } from "../components/InstallAppHint";
 
 const MIN_INTERVAL_MS = 2000;
 const HEARTBEAT_MS = 10_000;
+/** Una lectura más vieja que esto es el lugar de antes, no donde está el teléfono ahora. */
+const MAX_FIX_AGE_MS = 30_000;
 
 function postStop(roomId: string) {
   const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/stop`;
@@ -71,6 +73,9 @@ export function Share() {
   } | null>(null);
   const lastHeadingEmit = useRef(0);
   const lastPostAt = useRef(0);
+  const lastFixAtRef = useRef(0);
+  const forceFreshRef = useRef(false);
+  const shareEpochRef = useRef(1);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
@@ -97,7 +102,7 @@ export function Share() {
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
-  const postLocation = (payload: NonNullable<typeof lastGeoPayload.current>) => {
+  const postLocation = (payload: NonNullable<typeof lastGeoPayload.current> & { epoch: number }) => {
     if (!roomId) return;
     const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/location`;
     void fetchWithTimeout(url, {
@@ -113,11 +118,12 @@ export function Share() {
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>, reliable = false) => {
     if (!roomId || !sharingActive.current) return;
+    const stamped = { ...payload, epoch: shareEpochRef.current };
     lastGeoPayload.current = payload;
     const now = Date.now();
     if (reliable || now - lastPostAt.current >= 3_000) {
       lastPostAt.current = now;
-      postLocation(payload);
+      postLocation(stamped);
     }
     const s = socketRef.current;
     if (!s) return;
@@ -125,7 +131,7 @@ export function Share() {
       s.connect();
       return;
     }
-    const body = { roomId, ...payload };
+    const body = { roomId, ...stamped };
     if (!reliable) {
       s.emit("location", body);
       return;
@@ -168,7 +174,8 @@ export function Share() {
     if (!socket || !roomId) return;
     const flushPendingLocation = () => {
       const payload = lastGeoPayload.current;
-      if (!payload) return;
+      if (!payload || document.visibilityState === "hidden") return;
+      if (Date.now() - lastFixAtRef.current > MAX_FIX_AGE_MS) return;
       emitLocation(payload);
     };
     socket.on("connect", flushPendingLocation);
@@ -209,8 +216,11 @@ export function Share() {
 
     const onPos = (p: GeolocationPosition) => {
       if (cancelled || !sharingActive.current) return;
+      const fixAge = Date.now() - p.timestamp;
+      if (!Number.isFinite(p.timestamp) || fixAge > MAX_FIX_AGE_MS) return;
       hadFix = true;
       lastFixAt = Date.now();
+      lastFixAtRef.current = lastFixAt;
       setResuming(false);
       setGeoErr(null);
       setAccuracy(
@@ -251,8 +261,10 @@ export function Share() {
         distanceMeters({ lat: prev.lat, lng: prev.lng }, { lat, lng }) >= MIN_MOVE_M;
       const due = now - prev.t >= MIN_INTERVAL_MS;
       const first = !hasEmitted.current;
+      const fresh = forceFreshRef.current;
 
-      if (first || due || moved) {
+      if (fresh || first || due || moved) {
+        forceFreshRef.current = false;
         const prevCoord = lastEmitCoords.current;
         if (prevCoord && distanceMeters(prevCoord, { lat, lng }) >= MIN_COURSE_M) {
           const brg = initialBearingDeg(prevCoord, { lat, lng });
@@ -292,19 +304,64 @@ export function Share() {
       });
     };
 
-    const stopResume = onPageResume(() => {
-      if (cancelled) return;
+    const sendPause = () => {
+      if (cancelled || !sharingActive.current) return;
+      const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/pause`;
+      void fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ epoch: shareEpochRef.current }),
+        keepalive: true,
+        cache: "no-store",
+      }).catch(() => {
+        /* al volver, una lectura nueva levanta la pausa */
+      });
+    };
+
+    const resumeSharing = () => {
+      shareEpochRef.current += 1;
+      forceFreshRef.current = true;
       setResuming(true);
-      const payload = lastGeoPayload.current;
-      if (payload) postLocation(payload);
       kickSocket(socketRef.current);
+      const payload = lastGeoPayload.current;
+      if (payload && Date.now() - lastFixAtRef.current <= MAX_FIX_AGE_MS) {
+        emitLocation({ ...payload, heading: deviceHeadingRef.current ?? payload.heading }, true);
+      }
       poke();
-    });
+    };
+
+    let leftScreen = document.visibilityState === "hidden";
+    const onVis = () => {
+      if (cancelled) return;
+      if (document.visibilityState === "hidden") {
+        leftScreen = true;
+        sendPause();
+        return;
+      }
+      if (!leftScreen) return;
+      leftScreen = false;
+      resumeSharing();
+    };
+
+    const onHide = () => {
+      if (cancelled) return;
+      leftScreen = true;
+      sendPause();
+    };
+
+    const onShow = (event: PageTransitionEvent) => {
+      if (!event.persisted || cancelled) return;
+      resumeSharing();
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
 
     const heartbeatId = window.setInterval(() => {
-      if (!sharingActive.current) return;
+      if (!sharingActive.current || document.visibilityState === "hidden") return;
       const payload = lastGeoPayload.current;
-      if (!payload) return;
+      if (!payload || Date.now() - lastFixAtRef.current > MAX_FIX_AGE_MS) return;
       const heading = deviceHeadingRef.current ?? payload.heading;
       lastEmit.current.t = Date.now();
       emitLocation({ ...payload, heading }, true);
@@ -323,7 +380,9 @@ export function Share() {
 
     return () => {
       cancelled = true;
-      stopResume();
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(heartbeatId);
       window.clearInterval(watchdogId);
@@ -369,8 +428,9 @@ export function Share() {
 
   useEffect(() => {
     if (deviceHeading == null || !roomId || !sharingActive.current) return;
+    if (document.visibilityState === "hidden") return;
     const base = lastGeoPayload.current;
-    if (!base) return;
+    if (!base || Date.now() - lastFixAtRef.current > MAX_FIX_AGE_MS) return;
     const now = Date.now();
     const prev = base.heading;
     const turned = prev == null || smallestAngleDelta(prev, deviceHeading) >= HEADING_EMIT_DEG;
@@ -432,12 +492,12 @@ export function Share() {
         {watchers === 1 ? "Hay 1 persona mirando." : `Hay ${watchers} personas mirando.`}
       </p>
       <p className="muted" style={{ marginTop: "-0.25rem" }}>
-        Dejá esta pantalla adelante, con el celular despierto. Si pasás a otra app o se apaga la pantalla, el
-        enlace queda en el último lugar hasta que vuelvas.
+        Dejá esta pantalla adelante, con el celular despierto. Si pasás a otra app o se apaga la pantalla, quien
+        mira ve enseguida que quedaste en pausa.
       </p>
       {resuming ? (
         <p className="muted" role="status">
-          Retomando la ubicación…
+          Buscando dónde estás ahora…
         </p>
       ) : null}
 
