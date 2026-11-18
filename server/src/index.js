@@ -52,6 +52,9 @@ const lastLocationByRoom = new Map();
 /** @type {Map<string, number>} */
 const roomSeenAt = new Map();
 
+/** Salas cerradas con «Dejar de compartir». Un POST tardío no las revive. */
+const stoppedRooms = new Set();
+
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
 
 function touchRoom(roomId) {
@@ -64,6 +67,24 @@ function validLatLng(lat, lng) {
 }
 
 const ROOM_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+function saveLocation(roomId, payload) {
+  const { lat, lng, heading, accuracy, courseDeg } = payload ?? {};
+  if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId) || stoppedRooms.has(roomId) || !validLatLng(lat, lng)) {
+    return null;
+  }
+  touchRoom(roomId);
+  const update = {
+    lat,
+    lng,
+    heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
+    courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
+    accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : undefined,
+    t: Date.now(),
+  };
+  lastLocationByRoom.set(roomId, update);
+  return update;
+}
 
 const roomSweep = setInterval(() => {
   const cutoff = Date.now() - ROOM_TTL_MS;
@@ -94,6 +115,10 @@ app.get("/api/rooms/:id/location", (req, res) => {
     return;
   }
   res.set("Cache-Control", "no-store");
+  if (stoppedRooms.has(id)) {
+    res.json({ ended: true });
+    return;
+  }
   const loc = lastLocationByRoom.get(id);
   if (!loc) {
     res.status(204).end();
@@ -115,9 +140,71 @@ const io = new Server(server, {
   pingInterval: 25_000,
 });
 
+function endRoom(roomId) {
+  if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return false;
+  if (stoppedRooms.has(roomId)) return false;
+  stoppedRooms.add(roomId);
+  lastLocationByRoom.delete(roomId);
+  rooms.delete(roomId);
+  roomSeenAt.delete(roomId);
+  io.to(roomId).emit("sharing-ended");
+  io.to(roomId).emit("room-status", { peers: 0 });
+  return true;
+}
+
+function emitPeerCount(roomId, exceptId) {
+  void io
+    .in(roomId)
+    .fetchSockets()
+    .then((list) => {
+      const peers = list.filter((peer) => peer.id !== exceptId).length;
+      io.to(roomId).emit("room-status", { peers });
+    })
+    .catch(() => {
+      /* la cuenta de mirones es accesoria */
+    });
+}
+
+/** Respaldo del socket: si el polling se corta, el visor igual lee esta posición por HTTP. */
+app.post("/api/rooms/:id/location", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = req.params.id;
+  if (typeof id !== "string" || !ROOM_ID_RE.test(id)) {
+    res.status(400).json({ error: "Código inválido" });
+    return;
+  }
+  if (stoppedRooms.has(id)) {
+    res.status(409).json({ ended: true });
+    return;
+  }
+  const update = saveLocation(id, req.body);
+  if (!update) {
+    res.status(400).json({ error: "Ubicación inválida" });
+    return;
+  }
+  io.to(id).emit("location-update", update);
+  res.json({ ok: true, t: update.t });
+});
+
+app.post("/api/rooms/:id/stop", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = req.params.id;
+  if (typeof id !== "string" || !ROOM_ID_RE.test(id)) {
+    res.status(400).json({ error: "Código inválido" });
+    return;
+  }
+  endRoom(id);
+  res.json({ ok: true, ended: true });
+});
+
 io.on("connection", (socket) => {
   socket.on("join", async ({ roomId }, ack) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
+    if (stoppedRooms.has(roomId)) {
+      socket.emit("sharing-ended");
+      if (typeof ack === "function") ack({ ok: false, ended: true });
+      return;
+    }
     touchRoom(roomId);
     socket.join(roomId);
     const cached = lastLocationByRoom.get(roomId);
@@ -132,33 +219,30 @@ io.on("connection", (socket) => {
   });
 
   socket.on("location", (payload, ack) => {
-    const { roomId, lat, lng, heading, accuracy, courseDeg } = payload ?? {};
     const reply = (body) => {
       if (typeof ack === "function") ack(body);
     };
-    if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId) || !validLatLng(lat, lng)) {
+    const roomId = payload?.roomId;
+    const update = saveLocation(roomId, payload);
+    if (!update) {
       reply({ ok: false });
       return;
     }
-    touchRoom(roomId);
-    const update = {
-      lat,
-      lng,
-      heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
-      courseDeg: typeof courseDeg === "number" && Number.isFinite(courseDeg) ? courseDeg : null,
-      accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : undefined,
-      t: Date.now(),
-    };
-    lastLocationByRoom.set(roomId, update);
     socket.to(roomId).emit("location-update", update);
     reply({ ok: true, t: update.t });
   });
 
   socket.on("stop-sharing", ({ roomId }) => {
     if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId)) return;
-    lastLocationByRoom.delete(roomId);
+    endRoom(roomId);
     socket.leave(roomId);
-    socket.to(roomId).emit("sharing-ended");
+  });
+
+  socket.on("disconnecting", () => {
+    for (const roomId of socket.rooms) {
+      if (roomId === socket.id || !ROOM_ID_RE.test(roomId) || stoppedRooms.has(roomId)) continue;
+      emitPeerCount(roomId, socket.id);
+    }
   });
 });
 

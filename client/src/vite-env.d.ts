@@ -13,8 +13,14 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 /** Callback opcional de la API de Maps JS ante error de autenticación / referrer. */
 interface Window {
   gm_authFailure?: () => void;
   __livePovMapsLimited?: boolean;
+  __livePovInstall?: BeforeInstallPromptEvent | null;
 }

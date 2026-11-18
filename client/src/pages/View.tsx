@@ -7,13 +7,15 @@ import { ViewerContextPanel } from "../components/ViewerContextPanel";
 import { CompassRose } from "../components/CompassRose";
 import { WarmStatus } from "../components/WarmStatus";
 import { apiBase, fetchWithTimeout } from "../lib/apiBase";
+import { kickSocket, onPageResume } from "../lib/pageResume";
 
 type UpdatePayload = {
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
   heading?: number | null;
   courseDeg?: number | null;
   t?: number;
+  ended?: boolean;
 };
 
 export function View() {
@@ -27,18 +29,38 @@ export function View() {
   const [receivedAt, setReceivedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const lastStamp = useRef(0);
+  const lastClientReceipt = useRef(0);
   const endedRef = useRef(false);
+  const socketRef = useRef(socket);
+  socketRef.current = socket;
+  const pullRef = useRef<() => void>(() => {});
+  const lastKick = useRef(0);
 
   useJoinRoom(socket, roomId);
 
-  function applyUpdate(p: UpdatePayload) {
-    const stamp = typeof p.t === "number" && Number.isFinite(p.t) ? p.t : Date.now();
-    if (stamp < lastStamp.current) return;
-    lastStamp.current = stamp;
-    endedRef.current = false;
-    setEnded(false);
+  function endSession() {
+    endedRef.current = true;
+    lastClientReceipt.current = 0;
+    setEnded(true);
     setWaiting(false);
-    setReceivedAt(stamp);
+    setPos(null);
+    setHeading(null);
+    setCourseDeg(null);
+    setReceivedAt(null);
+  }
+
+  function applyUpdate(p: UpdatePayload) {
+    if (endedRef.current || p.ended) {
+      if (p.ended) endSession();
+      return;
+    }
+    if (typeof p.lat !== "number" || typeof p.lng !== "number") return;
+    const stamp = typeof p.t === "number" && Number.isFinite(p.t) ? p.t : Date.now();
+    if (stamp <= lastStamp.current) return;
+    lastStamp.current = stamp;
+    lastClientReceipt.current = Date.now();
+    setWaiting(false);
+    setReceivedAt(Date.now());
     setPos({ lat: p.lat, lng: p.lng });
     if ("heading" in p) {
       setHeading(p.heading != null && Number.isFinite(p.heading) ? p.heading : null);
@@ -61,14 +83,7 @@ export function View() {
     };
 
     const onEnded = () => {
-      endedRef.current = true;
-      lastStamp.current = Date.now();
-      setEnded(true);
-      setWaiting(false);
-      setPos(null);
-      setHeading(null);
-      setCourseDeg(null);
-      setReceivedAt(null);
+      endSession();
     };
 
     socket.on("location-update", onUpdate);
@@ -93,6 +108,10 @@ export function View() {
         .then(async (res) => {
           if (cancelled || res.status === 204 || !res.ok) return;
           const data = (await res.json()) as UpdatePayload;
+          if (data.ended) {
+            endSession();
+            return;
+          }
           if (typeof data.lat !== "number" || typeof data.lng !== "number") return;
           applyUpdate(data);
         })
@@ -104,6 +123,7 @@ export function View() {
         });
     };
 
+    pullRef.current = pull;
     pull();
     const id = window.setInterval(pull, 4_000);
     return () => {
@@ -111,6 +131,28 @@ export function View() {
       window.clearInterval(id);
     };
   }, [roomId]);
+
+  useEffect(() => {
+    return onPageResume(() => {
+      pullRef.current();
+      lastKick.current = Date.now();
+      kickSocket(socketRef.current);
+    });
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || endedRef.current) return;
+      const seen = lastClientReceipt.current;
+      if (seen <= 0 || Date.now() - seen < 22_000) return;
+      const now = Date.now();
+      if (now - lastKick.current < 15_000) return;
+      lastKick.current = now;
+      pullRef.current();
+      kickSocket(socketRef.current);
+    }, 5_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   return (
     <div className="layout layout-wide">
@@ -126,11 +168,11 @@ export function View() {
           className="muted"
           style={{
             marginTop: "-0.25rem",
-            color: now - receivedAt > 20_000 ? "var(--danger)" : undefined,
+            color: now - receivedAt > 35_000 ? "var(--danger)" : undefined,
           }}
         >
-          {now - receivedAt > 20_000
-            ? "Sin actualización reciente. Reintentando…"
+          {now - receivedAt > 35_000
+            ? "Quedó en el último lugar. Quien comparte tiene que volver a la app, con la pantalla despierta."
             : `Ubicación de hace ${Math.max(0, Math.round((now - receivedAt) / 1000))} s`}
         </p>
       ) : null}
@@ -152,21 +194,25 @@ export function View() {
         </div>
       ) : null}
 
-      <ViewerContextPanel sharerPos={pos} />
+      {ended ? null : (
+        <>
+          <ViewerContextPanel sharerPos={pos} />
 
-      {pos ? (
-        <div className="card" style={{ marginBottom: "1rem" }}>
-          <CompassRose bearingDeg={heading ?? courseDeg} compact />
-        </div>
-      ) : null}
+          {pos ? (
+            <div className="card" style={{ marginBottom: "1rem" }}>
+              <CompassRose bearingDeg={heading ?? courseDeg} compact />
+            </div>
+          ) : null}
 
-      <StreetFollowView
-        position={pos}
-        headingDeg={heading}
-        courseDeg={courseDeg}
-        positionSource="remote"
-        layout="viewer"
-      />
+          <StreetFollowView
+            position={pos}
+            headingDeg={heading}
+            courseDeg={courseDeg}
+            positionSource="remote"
+            layout="viewer"
+          />
+        </>
+      )}
     </div>
   );
 }

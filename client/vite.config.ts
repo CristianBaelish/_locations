@@ -64,7 +64,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: "autoUpdate",
-        includeAssets: ["icon.svg"],
+        includeAssets: ["icon.svg", "apple-touch-icon.png", "icon-192.png", "icon-512.png"],
         manifest: {
           name: "Ubicación + vista de calle",
           short_name: "LivePOV",
@@ -74,13 +74,27 @@ export default defineConfig(({ mode }) => {
           display: "standalone",
           orientation: "any",
           start_url: "/",
+          scope: "/",
+          id: "/",
           lang: "es",
           icons: [
             {
-              src: "icon.svg",
+              src: "icon-192.png",
+              sizes: "192x192",
+              type: "image/png",
+              purpose: "any",
+            },
+            {
+              src: "icon-512.png",
               sizes: "512x512",
-              type: "image/svg+xml",
-              purpose: "any maskable",
+              type: "image/png",
+              purpose: "any",
+            },
+            {
+              src: "icon-512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "maskable",
             },
           ],
         },

@@ -22,12 +22,21 @@
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/icon.svg" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="LivePOV" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
       window.gm_authFailure = function () {
         window.__livePovMapsLimited = true;
         window.dispatchEvent(new Event("livepov-maps-limited"));
       };
+      window.__livePovInstall = null;
+      window.addEventListener("beforeinstallprompt", function (event) {
+        event.preventDefault();
+        window.__livePovInstall = event;
+        window.dispatchEvent(new Event("livepov-install-ready"));
+      });
     </script>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>Ubicación + vista de calle</title>

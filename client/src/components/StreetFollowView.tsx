@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadGoogleMaps, resetGoogleMaps } from "../lib/mapsLoader";
 import { WarmStatus } from "./WarmStatus";
 import { useDebounced } from "../hooks/useDebounced";
-import { distanceMeters } from "../lib/geo";
+import { distanceMeters, smallestAngleDelta } from "../lib/geo";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -92,6 +92,9 @@ export function StreetFollowView({
     course: courseDeg != null && Number.isFinite(courseDeg) ? courseDeg : null,
     heading: headingDeg != null && Number.isFinite(headingDeg) ? headingDeg : null,
   };
+  const handsOffRef = useRef(true);
+  const lockedPanoRef = useRef<string | null>(null);
+  const suppressStreetRef = useRef(0);
 
   const [mapsError, setMapsError] = useState<string | null>(null);
   const [mapsLimited, setMapsLimited] = useState(false);
@@ -100,6 +103,8 @@ export function StreetFollowView({
   const [panoHint, setPanoHint] = useState<string | null>(null);
   const [panoHasImage, setPanoHasImage] = useState(false);
   const [panoRetry, setPanoRetry] = useState(0);
+  const [handsOff, setHandsOff] = useState(true);
+  handsOffRef.current = handsOff;
 
   const stablePosition = useMemo((): LatLng | null => {
     if (!position) return null;
@@ -118,6 +123,7 @@ export function StreetFollowView({
 
   useEffect(() => {
     let cancelled = false;
+    const listeners: google.maps.MapsEventListener[] = [];
 
     loadGoogleMaps()
       .then((g) => {
@@ -134,13 +140,24 @@ export function StreetFollowView({
           fullscreenControl: true,
         });
 
-        const pano = new g.maps.StreetViewPanorama(panoEl.current, {
+        const panoOptions: google.maps.StreetViewPanoramaOptions & {
+          motionTracking: boolean;
+          motionTrackingControl: boolean;
+        } = {
           visible: false,
-          addressControl: true,
-          linksControl: true,
-          panControl: true,
+          addressControl: false,
+          clickToGo: false,
+          linksControl: false,
+          panControl: false,
+          zoomControl: false,
+          scrollwheel: false,
+          disableDoubleClickZoom: true,
+          fullscreenControl: false,
+          motionTracking: false,
+          motionTrackingControl: false,
           enableCloseButton: false,
-        });
+        };
+        const pano = new g.maps.StreetViewPanorama(panoEl.current, panoOptions);
 
         map.setStreetView(pano);
 
@@ -152,7 +169,29 @@ export function StreetFollowView({
         markerRef.current = marker;
         panoRef.current = pano;
         svRef.current = new g.maps.StreetViewService();
-        setMapsReady(true);
+
+        const revertLockedView = () => {
+          if (cancelled || Date.now() < suppressStreetRef.current || !handsOffRef.current) return;
+          const locked = lockedPanoRef.current;
+          if (locked && pano.getPano() !== locked) {
+            suppressStreetRef.current = Date.now() + 600;
+            pano.setPano(locked);
+          }
+          const wanted = povSourceRef.current.heading ?? povSourceRef.current.course;
+          if (wanted == null) return;
+          const pov = pano.getPov();
+          const pitch = pov?.pitch ?? 0;
+          const headingNow = pov?.heading ?? 0;
+          if (smallestAngleDelta(headingNow, wanted) > 2 || Math.abs(pitch) > 2) {
+            suppressStreetRef.current = Date.now() + 600;
+            pano.setPov({ heading: wanted, pitch: 0 });
+          }
+        };
+        if (!cancelled) {
+          listeners.push(pano.addListener("pov_changed", revertLockedView));
+          listeners.push(pano.addListener("pano_changed", revertLockedView));
+          setMapsReady(true);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -162,6 +201,7 @@ export function StreetFollowView({
 
     return () => {
       cancelled = true;
+      for (const listener of listeners) listener.remove();
     };
   }, [loadAttempt]);
 
@@ -275,6 +315,8 @@ export function StreetFollowView({
         keepCurrent();
         return;
       }
+      lockedPanoRef.current = loc.pano;
+      suppressStreetRef.current = Date.now() + 600;
       panoNow.setPano(loc.pano);
       panoTrack.current.hasImage = true;
 
@@ -288,6 +330,7 @@ export function StreetFollowView({
         povHeading = g.geometry.spherical.computeHeading(loc.latLng, latLng);
       }
 
+      suppressStreetRef.current = Date.now() + 600;
       panoNow.setPov({ heading: povHeading, pitch: 0 });
       panoNow.setVisible(true);
       setPanoHasImage(true);
@@ -310,19 +353,40 @@ export function StreetFollowView({
   }, [mapsReady, debouncedPos, panoRetry]);
 
   useEffect(() => {
-    if (!panoHasImage || !panoRef.current) return;
+    const pano = panoRef.current;
+    if (!mapsReady || !pano) return;
+    const followOpts: google.maps.StreetViewPanoramaOptions & {
+      motionTracking: boolean;
+      motionTrackingControl: boolean;
+    } = {
+      clickToGo: !handsOff,
+      linksControl: !handsOff,
+      panControl: !handsOff,
+      zoomControl: !handsOff,
+      scrollwheel: !handsOff,
+      disableDoubleClickZoom: handsOff,
+      fullscreenControl: false,
+      motionTracking: false,
+      motionTrackingControl: false,
+    };
+    pano.setOptions(followOpts);
+  }, [mapsReady, handsOff]);
+
+  useEffect(() => {
+    if (!handsOff || !panoHasImage || !panoRef.current) return;
     const { course, heading: deviceH } = povSourceRef.current;
     const deg = deviceH ?? course;
     if (deg == null) return;
+    suppressStreetRef.current = Date.now() + 600;
     panoRef.current.setPov({ heading: deg, pitch: 0 });
-  }, [courseDeg, headingDeg, panoHasImage]);
+  }, [courseDeg, headingDeg, panoHasImage, handsOff]);
 
   return (
     <div className="map-stage">
       {mapsLimited ? (
         <p className="note">
-          Google muestra el mapa en modo de prueba: la marca de agua y la calle en negativo se van
-          cuando la facturación del proyecto de la clave queda activa.
+          Google limitó el mapa en esta página. Si ves la marca de agua o la calle en negativo, la
+          facturación de la clave tiene que quedar activa.
         </p>
       ) : null}
       {mapsError ? (
@@ -347,6 +411,15 @@ export function StreetFollowView({
           {panoHint}
         </p>
       ) : null}
+      {mapsReady && position ? (
+        <p className="muted" style={{ margin: "0 0 0.5rem" }}>
+          {handsOff
+            ? positionSource === "remote"
+              ? "La calle sigue la brújula y el camino de quien comparte."
+              : "La calle sigue tu brújula y tu camino."
+            : "Estás moviendo la calle a mano. La brújula queda en pausa."}
+        </p>
+      ) : null}
       {!mapsError ? <div className="map-frame">
         {!mapsReady && !mapsError ? (
           <div className="map-loading">
@@ -366,6 +439,19 @@ export function StreetFollowView({
             </div>
           ) : null}
           <div ref={panoEl} className="pano-inner" />
+          {handsOff && panoHasImage ? <div className="pano-lock" aria-hidden="true" /> : null}
+          {mapsReady && position ? (
+            <div className="pano-toolbar">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setHandsOff((locked) => !locked)}
+                aria-pressed={handsOff}
+              >
+                {handsOff ? "Mover a mano" : "Seguir la brújula"}
+              </button>
+            </div>
+          ) : null}
         </div>
         </div>
       </div> : null}

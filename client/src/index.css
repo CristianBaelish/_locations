@@ -187,6 +187,37 @@ button:disabled {
   min-height: inherit;
 }
 
+.pano-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+}
+
+.pano-toolbar {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 4;
+}
+
+.pano-toolbar button.secondary {
+  min-height: 44px;
+  padding: 0.4rem 0.9rem;
+  background: rgba(255, 253, 249, 0.94);
+  box-shadow: 0 6px 16px rgba(63, 45, 40, 0.14);
+  font-size: 0.92rem;
+}
+
+.install-steps {
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.install-steps li + li {
+  margin-top: 0.35rem;
+}
+
 .pano-placeholder {
   min-height: 220px;
   display: flex;

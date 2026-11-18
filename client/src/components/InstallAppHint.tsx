@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-type BeforeInstallPrompt = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   return (
@@ -22,55 +17,68 @@ function isAndroid(): boolean {
 }
 
 export function InstallAppHint() {
-  const [bip, setBip] = useState<BeforeInstallPrompt | null>(null);
+  const [bip, setBip] = useState<BeforeInstallPromptEvent | null>(
+    () => (typeof window !== "undefined" ? window.__livePovInstall ?? null : null)
+  );
+  const [installed, setInstalled] = useState(isStandalone);
 
   useEffect(() => {
-    const onBip = (e: Event) => {
-      e.preventDefault();
-      setBip(e as BeforeInstallPrompt);
+    const sync = () => {
+      if (window.__livePovInstall) setBip(window.__livePovInstall);
     };
-    window.addEventListener("beforeinstallprompt", onBip);
-    return () => window.removeEventListener("beforeinstallprompt", onBip);
+    sync();
+    const onInstalled = () => setInstalled(true);
+    window.addEventListener("livepov-install-ready", sync);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("livepov-install-ready", sync);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
   }, []);
 
-  const installAndroid = useCallback(async () => {
-    if (!bip) return;
-    await bip.prompt();
-    await bip.userChoice.catch(() => undefined);
+  const install = useCallback(async () => {
+    const promptEvent = bip ?? window.__livePovInstall ?? null;
+    if (!promptEvent) return;
+    await promptEvent.prompt();
+    await promptEvent.userChoice.catch(() => undefined);
+    window.__livePovInstall = null;
     setBip(null);
   }, [bip]);
 
-  const installIOS = useCallback(async () => {
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({ url: window.location.href, title: document.title });
-      } catch {
-        /* usuario canceló */
-      }
-    }
-  }, []);
+  if (installed) return null;
 
-  if (isStandalone()) return null;
-
-  const showAndroid = isAndroid() && bip != null;
-  const showIOS = isIOS();
-
-  if (!showAndroid && !showIOS) return null;
+  const ios = isIOS();
+  const android = isAndroid();
+  const canPrompt = !ios && bip != null;
+  if (!ios && !android && !canPrompt) return null;
 
   return (
-    <div className="card" style={{ marginTop: "1rem" }}>
-      <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-        {showAndroid ? (
-          <button type="button" onClick={() => void installAndroid()}>
-            Instalar en Android
-          </button>
-        ) : null}
-        {showIOS ? (
-          <button type="button" className={showAndroid ? "secondary" : undefined} onClick={() => void installIOS()}>
-            Instalar en iPhone
-          </button>
-        ) : null}
-      </div>
+    <div className="card">
+      <h2>En el inicio del celular</h2>
+      <p className="muted">
+        Queda como una app. Abrila desde ese ícono y dejá la pantalla despierta mientras compartís.
+      </p>
+      {canPrompt ? (
+        <button type="button" onClick={() => void install()}>
+          Instalar
+        </button>
+      ) : (
+        <ol className="install-steps">
+          {ios ? (
+            <>
+              <li>Tocá Compartir en la barra del navegador: el cuadrado con la flecha hacia arriba.</li>
+              <li>Elegí Agregar a inicio.</li>
+              <li>Abrila desde ese ícono.</li>
+            </>
+          ) : (
+            <>
+              <li>En Chrome, abrí el menú de los tres puntos.</li>
+              <li>Elegí Instalar app o Agregar a pantalla principal.</li>
+              <li>Abrila desde ese ícono.</li>
+            </>
+          )}
+        </ol>
+      )}
     </div>
   );
 }
