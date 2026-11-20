@@ -61,6 +61,9 @@ const liveEpochByRoom = new Map();
 /** Generación con la que la pantalla pasó a segundo plano. */
 const pausedEpochByRoom = new Map();
 
+/** Último `seq` de quien comparte. Un POST lento no puede pisar una ubicación más nueva. */
+const lastSeqByRoom = new Map();
+
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
 
 function touchRoom(roomId) {
@@ -79,6 +82,13 @@ function readEpoch(value) {
   return value;
 }
 
+function readSeq(value) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > Number.MAX_SAFE_INTEGER) {
+    return null;
+  }
+  return value;
+}
+
 function liveEpoch(roomId) {
   return liveEpochByRoom.get(roomId) ?? 0;
 }
@@ -88,6 +98,13 @@ function saveLocation(roomId, payload) {
   if (typeof roomId !== "string" || !ROOM_ID_RE.test(roomId) || stoppedRooms.has(roomId) || !validLatLng(lat, lng)) {
     return null;
   }
+  const seq = readSeq(payload?.seq);
+  const seenSeq = lastSeqByRoom.get(roomId) ?? 0;
+  if (seq != null && seq <= seenSeq) {
+    return { stale: true };
+  }
+  if (seq != null) lastSeqByRoom.set(roomId, seq);
+
   const epoch = readEpoch(payload?.epoch);
   const pausedEpoch = pausedEpochByRoom.get(roomId);
   const paused = pausedEpoch != null && pausedEpoch >= liveEpoch(roomId);
@@ -121,6 +138,7 @@ const roomSweep = setInterval(() => {
     lastLocationByRoom.delete(id);
     liveEpochByRoom.delete(id);
     pausedEpochByRoom.delete(id);
+    lastSeqByRoom.delete(id);
   }
 }, 10 * 60 * 1000);
 if (typeof roomSweep.unref === "function") roomSweep.unref();
@@ -175,6 +193,7 @@ function endRoom(roomId) {
   lastLocationByRoom.delete(roomId);
   liveEpochByRoom.delete(roomId);
   pausedEpochByRoom.delete(roomId);
+  lastSeqByRoom.delete(roomId);
   rooms.delete(roomId);
   roomSeenAt.delete(roomId);
   io.to(roomId).emit("sharing-ended");
@@ -228,6 +247,10 @@ app.post("/api/rooms/:id/location", (req, res) => {
     return;
   }
   const update = saveLocation(id, req.body);
+  if (update?.stale) {
+    res.json({ ok: true, stale: true });
+    return;
+  }
   if (update?.ignored) {
     res.json({ ok: true, paused: true });
     return;
@@ -310,6 +333,10 @@ io.on("connection", (socket) => {
     };
     const roomId = payload?.roomId;
     const update = saveLocation(roomId, payload);
+    if (update?.stale) {
+      reply({ ok: true, stale: true });
+      return;
+    }
     if (update?.ignored) {
       reply({ ok: true, paused: true });
       return;

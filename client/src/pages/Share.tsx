@@ -76,6 +76,7 @@ export function Share() {
   const lastFixAtRef = useRef(0);
   const forceFreshRef = useRef(false);
   const shareEpochRef = useRef(1);
+  const sendSeqRef = useRef(0);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
@@ -102,7 +103,9 @@ export function Share() {
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
-  const postLocation = (payload: NonNullable<typeof lastGeoPayload.current> & { epoch: number }) => {
+  const postLocation = (
+    payload: NonNullable<typeof lastGeoPayload.current> & { epoch: number; seq: number }
+  ) => {
     if (!roomId) return;
     const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/location`;
     void fetchWithTimeout(url, {
@@ -118,7 +121,8 @@ export function Share() {
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>, reliable = false) => {
     if (!roomId || !sharingActive.current) return;
-    const stamped = { ...payload, epoch: shareEpochRef.current };
+    const seq = ++sendSeqRef.current;
+    const stamped = { ...payload, epoch: shareEpochRef.current, seq };
     lastGeoPayload.current = payload;
     const now = Date.now();
     if (reliable || now - lastPostAt.current >= 3_000) {
