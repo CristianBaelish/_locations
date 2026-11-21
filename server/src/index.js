@@ -6,6 +6,12 @@ import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
+import {
+  locationBlockedByPause,
+  pauseSuperseded,
+  readSession,
+  shouldClearPause,
+} from "./pauseSession.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -61,6 +67,12 @@ const liveEpochByRoom = new Map();
 /** Generación con la que la pantalla pasó a segundo plano. */
 const pausedEpochByRoom = new Map();
 
+/** Documento que publicó la última ubicación aceptada. */
+const activeSessionByRoom = new Map();
+
+/** Documento que pidió la pausa vigente. */
+const pausedSessionByRoom = new Map();
+
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
 
 function touchRoom(roomId) {
@@ -89,16 +101,22 @@ function saveLocation(roomId, payload) {
     return null;
   }
   const epoch = readEpoch(payload?.epoch);
-  const pausedEpoch = pausedEpochByRoom.get(roomId);
-  const paused = pausedEpoch != null && pausedEpoch >= liveEpoch(roomId);
-  if (paused && (epoch == null || epoch <= pausedEpoch)) {
+  const session = readSession(payload?.session);
+  const pausedEpoch = pausedEpochByRoom.get(roomId) ?? null;
+  const pausedSession = pausedSessionByRoom.get(roomId) ?? null;
+  const live = liveEpoch(roomId);
+  if (locationBlockedByPause({ pausedEpoch, liveEpoch: live, pausedSession, epoch, session })) {
     return { ignored: true };
   }
   touchRoom(roomId);
   if (epoch != null) {
-    liveEpochByRoom.set(roomId, Math.max(liveEpoch(roomId), epoch));
-    if (pausedEpoch == null || epoch > pausedEpoch) pausedEpochByRoom.delete(roomId);
+    liveEpochByRoom.set(roomId, Math.max(live, epoch));
   }
+  if (shouldClearPause({ pausedEpoch, pausedSession, epoch, session })) {
+    pausedEpochByRoom.delete(roomId);
+    pausedSessionByRoom.delete(roomId);
+  }
+  if (session) activeSessionByRoom.set(roomId, session);
   const update = {
     lat,
     lng,
@@ -121,6 +139,8 @@ const roomSweep = setInterval(() => {
     lastLocationByRoom.delete(id);
     liveEpochByRoom.delete(id);
     pausedEpochByRoom.delete(id);
+    activeSessionByRoom.delete(id);
+    pausedSessionByRoom.delete(id);
   }
 }, 10 * 60 * 1000);
 if (typeof roomSweep.unref === "function") roomSweep.unref();
@@ -175,6 +195,8 @@ function endRoom(roomId) {
   lastLocationByRoom.delete(roomId);
   liveEpochByRoom.delete(roomId);
   pausedEpochByRoom.delete(roomId);
+  activeSessionByRoom.delete(roomId);
+  pausedSessionByRoom.delete(roomId);
   rooms.delete(roomId);
   roomSeenAt.delete(roomId);
   io.to(roomId).emit("sharing-ended");
@@ -252,16 +274,26 @@ app.post("/api/rooms/:id/pause", (req, res) => {
     return;
   }
   const epoch = readEpoch(req.body?.epoch);
+  const session = readSession(req.body?.session);
   if (epoch == null) {
     res.status(400).json({ error: "Generación inválida" });
     return;
   }
-  if (epoch < liveEpoch(id)) {
+  if (
+    pauseSuperseded({
+      epoch,
+      liveEpoch: liveEpoch(id),
+      session,
+      activeSession: activeSessionByRoom.get(id) ?? null,
+    })
+  ) {
     res.json({ ok: true, paused: false });
     return;
   }
   touchRoom(id);
   pausedEpochByRoom.set(id, epoch);
+  if (session) pausedSessionByRoom.set(id, session);
+  else pausedSessionByRoom.delete(id);
   const loc = lastLocationByRoom.get(id);
   const notice = loc ? { ...loc, paused: true } : { paused: true };
   if (loc) lastLocationByRoom.set(id, notice);

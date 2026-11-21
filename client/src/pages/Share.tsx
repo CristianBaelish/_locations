@@ -14,6 +14,7 @@ import { useJoinRoom } from "../hooks/useJoinRoom";
 import { useDeviceHeading } from "../hooks/useDeviceHeading";
 import { apiBase, fetchWithTimeout } from "../lib/apiBase";
 import { kickSocket } from "../lib/pageResume";
+import { createShareSessionId } from "../lib/shareSession";
 import { InstallAppHint } from "../components/InstallAppHint";
 
 const MIN_INTERVAL_MS = 2000;
@@ -76,6 +77,11 @@ export function Share() {
   const lastFixAtRef = useRef(0);
   const forceFreshRef = useRef(false);
   const shareEpochRef = useRef(1);
+  const shareSessionRef = useRef<string | null>(null);
+  const shareSession = () => {
+    if (!shareSessionRef.current) shareSessionRef.current = createShareSessionId();
+    return shareSessionRef.current;
+  };
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const viewerUrl =
@@ -102,7 +108,9 @@ export function Share() {
   const deviceHeadingRef = useRef(deviceHeading);
   deviceHeadingRef.current = deviceHeading;
 
-  const postLocation = (payload: NonNullable<typeof lastGeoPayload.current> & { epoch: number }) => {
+  const postLocation = (
+    payload: NonNullable<typeof lastGeoPayload.current> & { epoch: number; session: string }
+  ) => {
     if (!roomId) return;
     const url = `${apiBase()}/api/rooms/${encodeURIComponent(roomId)}/location`;
     void fetchWithTimeout(url, {
@@ -118,7 +126,11 @@ export function Share() {
 
   const emitLocation = (payload: NonNullable<typeof lastGeoPayload.current>, reliable = false) => {
     if (!roomId || !sharingActive.current) return;
-    const stamped = { ...payload, epoch: shareEpochRef.current };
+    const stamped = {
+      ...payload,
+      epoch: shareEpochRef.current,
+      session: shareSession(),
+    };
     lastGeoPayload.current = payload;
     const now = Date.now();
     if (reliable || now - lastPostAt.current >= 3_000) {
@@ -310,7 +322,10 @@ export function Share() {
       void fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epoch: shareEpochRef.current }),
+        body: JSON.stringify({
+          epoch: shareEpochRef.current,
+          session: shareSession(),
+        }),
         keepalive: true,
         cache: "no-store",
       }).catch(() => {
